@@ -1,5 +1,5 @@
 <div align="center">
-<img src="./LargeLogo.png" alt="FlowBench Logo" width="577" height="184">
+<img src="./LargeLogo-light-preview.png" alt="FlowBench Logo" width="577" height="184">
 </div>
 
 # FlowBench

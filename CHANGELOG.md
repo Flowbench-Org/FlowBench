@@ -6,6 +6,7 @@
 
 - Added multi-server selection for Server Agents with a scrollable checklist, Select All, Clear, and selected-count feedback.
 - Added batch start and stop dispatch with per-node failure isolation and aggregated operation results.
+- Updated the existing Japanese language pack to 1.0.1 with translations for the multi-server controls.
 
 ### Verified
 
