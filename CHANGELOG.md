@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.2.6] - 2026-10-24
+
+### Added
+
+- Added multi-server selection for Server Agents with a scrollable checklist, Select All, Clear, and selected-count feedback.
+- Added batch start and stop dispatch with per-node failure isolation and aggregated operation results.
+
+### Verified
+
+- Verified the Server Agents selection panel with mouse-wheel scrolling and checkbox state retention.
+- Verified Chinese and English UI text plus light and dark theme rendering.
+- Passed the full automated test suite before packaging.
+
 ## [1.2.5] - 2026-09-30
 
 ### Added

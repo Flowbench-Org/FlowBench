@@ -23,9 +23,9 @@ from urllib.parse import urlsplit
 from PySide6.QtCore import QTimer, Signal
 from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import (QBoxLayout, QFileDialog, QGridLayout, QHBoxLayout,
-                               QSizePolicy, QVBoxLayout, QWidget)
-from qfluentwidgets import (BodyLabel, CaptionLabel, ComboBox, FluentIcon as FIF, FluentStyleSheet,
-                            InfoBar,
+                               QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
+from qfluentwidgets import (BodyLabel, CaptionLabel, CheckBox, ComboBox, FluentIcon as FIF,
+                            FluentStyleSheet, InfoBar,
                             MessageBoxBase,
                             InfoBarPosition, LineEdit, PasswordLineEdit,
                             PrimaryPushButton, PushButton, ScrollArea,
@@ -41,6 +41,78 @@ from app.ui.stress_view import HIGH_RATE, MiniStat, fmt_bytes
 
 
 DEFAULT_AGENT_RELAY = "mqtt://broker.hivemq.com:8000"
+
+
+class AgentSelectionDialog(MessageBoxBase):
+    """Dialog for selecting several server agents for one operation."""
+
+    def __init__(self, agents, selected_ids=None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(L("选择服务器节点", "Select Server Agents"))
+        self.widget.setMinimumWidth(560)
+        FluentStyleSheet.DIALOG.apply(self, Theme.DARK if isDarkTheme() else Theme.LIGHT)
+        self.setMaskColor(QColor(0, 0, 0, 120) if isDarkTheme() else QColor(0, 0, 0, 76))
+        self.yesButton.setText(L("应用选择", "Apply selection"))
+        self.cancelButton.setText(L("取消", "Cancel"))
+
+        self.viewLayout.addWidget(StrongBodyLabel(
+            L("选择要执行任务的服务器", "Choose servers for this task"), self.widget))
+        self.viewLayout.addWidget(CaptionLabel(
+            L("可以选择一个、多个或全部服务器。离线节点也可以保留在队列中，待上线后执行。",
+              "Select one, several, or all servers. Offline nodes can stay queued and run when they come online."),
+            self.widget))
+
+        actions = QHBoxLayout()
+        self.selectAllBtn = PushButton(L("全选", "Select all"), self.widget)
+        self.clearBtn = PushButton(L("清空", "Clear"), self.widget)
+        self.selectedCount = CaptionLabel("", self.widget)
+        self.selectAllBtn.clicked.connect(lambda: self._set_all(True))
+        self.clearBtn.clicked.connect(lambda: self._set_all(False))
+        actions.addWidget(self.selectAllBtn)
+        actions.addWidget(self.clearBtn)
+        actions.addStretch(1)
+        actions.addWidget(self.selectedCount)
+        self.viewLayout.addLayout(actions)
+
+        self._checks = {}
+        selected = {str(value) for value in (selected_ids or [])}
+        content = QWidget(self.widget)
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(4, 4, 4, 4)
+        content_layout.setSpacing(6)
+        for agent in agents or []:
+            agent_id = str(agent.get("agent_id") or "").strip()
+            if not agent_id:
+                continue
+            state = L("在线", "online") if agent.get("online") else L("离线", "offline")
+            label = f"{agent.get('name') or agent_id} [{state}] — {agent_id}"
+            check = CheckBox(label, content)
+            check.setChecked(agent_id in selected)
+            check.stateChanged.connect(self._update_count)
+            self._checks[agent_id] = check
+            content_layout.addWidget(check)
+        if not self._checks:
+            empty = CaptionLabel(L("请先刷新服务器节点列表", "Refresh the server list first"), content)
+            content_layout.addWidget(empty)
+        content_layout.addStretch(1)
+        scroll = QScrollArea(self.widget)
+        scroll.setWidgetResizable(True)
+        scroll.setMinimumHeight(180)
+        scroll.setWidget(content)
+        self.viewLayout.addWidget(scroll)
+        self._update_count()
+
+    def _set_all(self, checked):
+        for check in self._checks.values():
+            check.setChecked(checked)
+        self._update_count()
+
+    def _update_count(self, *_):
+        count = len(self.selected_ids())
+        self.selectedCount.setText(L(f"已选择 {count} 个", f"{count} selected"))
+
+    def selected_ids(self):
+        return [agent_id for agent_id, check in self._checks.items() if check.isChecked()]
 
 
 class GenerateNodeDialog(MessageBoxBase):
@@ -192,6 +264,12 @@ class AgentView(ScrollArea):
         self.setWidgetResizable(True)
         self.enableTransparentBackground()
         self._agents = []
+        # The combo remains the legacy single-agent path until the selection
+        # dialog is applied; afterwards this set is the source for batch
+        # start/stop operations, including an intentional empty selection.
+        self._selected_agent_ids = set()
+        self._multi_selection_active = False
+        self._updating_combo = False
         self._ca_file = str(settings.agent_hub_ca or "")
         self._result.connect(self._on_result)
         self._poll_in_flight = False
@@ -259,7 +337,14 @@ class AgentView(ScrollArea):
         selection.addWidget(BodyLabel(L("服务器节点", "Server agent"), control))
         self.agentCombo = ComboBox(control)
         self.agentCombo.setPlaceholderText(L("先刷新在线节点", "Refresh to load agents"))
+        self.agentCombo.currentIndexChanged.connect(self._on_combo_selection_changed)
         selection.addWidget(self.agentCombo, 1)
+        self.selectAgentsBtn = PushButton(L("多选服务器…", "Select servers…"), control)
+        self.selectAgentsBtn.setToolTip(L(
+            "打开面板选择多个服务器执行同一个任务。",
+            "Open a panel to select multiple servers for the same task."))
+        self.selectAgentsBtn.clicked.connect(self.select_agents)
+        selection.addWidget(self.selectAgentsBtn)
         self.nodeStatus = CaptionLabel(L("未连接", "Not connected"), control)
         selection.addWidget(self.nodeStatus)
         form.addLayout(selection)
@@ -412,7 +497,7 @@ class AgentView(ScrollArea):
 
     def _poll_remote_status(self):
         """Keep the selected job visible on the Stress Test page."""
-        if self._poll_in_flight or not self._selected_agent():
+        if self._poll_in_flight or not self._selected_agents_ids():
             return
         try:
             client = self._client()
@@ -919,8 +1004,58 @@ exec python3 agent/server_agent.py --config agent/agent.json
         return exe, linux_root
 
     def _selected_agent(self):
+        ids = self._selected_agents_ids()
+        return ids[0] if ids else ""
+
+    def _selected_agents_ids(self):
+        """Return the current operation selection in stable display order."""
+        available = [str(agent.get("agent_id") or "") for agent in self._agents]
+        if self._multi_selection_active:
+            selected = self._selected_agent_ids
+            return [agent_id for agent_id in available if agent_id in selected]
         idx = self.agentCombo.currentIndex()
-        return self._agents[idx]["agent_id"] if 0 <= idx < len(self._agents) else ""
+        if 0 <= idx < len(self._agents):
+            agent_id = str(self._agents[idx].get("agent_id") or "")
+            return [agent_id] if agent_id else []
+        return []
+
+    def _on_combo_selection_changed(self, *_):
+        # Choosing an item in the legacy combo intentionally switches back to
+        # single-agent mode, so the old workflow remains predictable.
+        if getattr(self, "_updating_combo", False):
+            return
+        if self._multi_selection_active:
+            self._selected_agent_ids.clear()
+            self._multi_selection_active = False
+            self._update_selection_summary()
+
+    def _update_selection_summary(self):
+        if self._multi_selection_active:
+            count = len(self._selected_agents_ids())
+            self.selectAgentsBtn.setText(L(f"已选 {count} 个服务器…", f"{count} servers selected…"))
+        else:
+            self.selectAgentsBtn.setText(L("多选服务器…", "Select servers…"))
+
+    def select_agents(self):
+        if not self._agents:
+            self._show_error(L("请先刷新服务器节点列表", "Refresh the server list first"))
+            return
+        selected = (self._selected_agent_ids if self._multi_selection_active
+                    else set(self._selected_agents_ids()))
+        dialog = AgentSelectionDialog(self._agents, selected, self.window())
+        if not dialog.exec():
+            return
+        self._selected_agent_ids = set(dialog.selected_ids())
+        self._multi_selection_active = True
+        self._update_selection_summary()
+        count = len(self._selected_agent_ids)
+        if count:
+            self.nodeStatus.setText(L(f"已选择 {count} 个节点", f"{count} agent(s) selected"))
+            self._log(L(f"已选择 {count} 个服务器节点。", f"Selected {count} server agent(s)."))
+        else:
+            self.nodeStatus.setText(L(f"已加载 {len(self._agents)} 个节点",
+                                      f"Loaded {len(self._agents)} agent(s)"))
+            self._log(L("已清空服务器节点选择。", "Cleared server-agent selection."))
 
     def _stress_config(self):
         """Build the same single-target config used by the existing Collab page."""
@@ -985,9 +1120,9 @@ exec python3 agent/server_agent.py --config agent/agent.json
         return config
 
     def run_job(self):
-        agent_id = self._selected_agent()
-        if not agent_id:
-            self._show_error(L("请先刷新并选择节点", "Refresh and select an agent first"))
+        agent_ids = self._selected_agents_ids()
+        if not agent_ids:
+            self._show_error(L("请先刷新并选择服务器节点", "Refresh and select at least one server agent first"))
             return
         try:
             client = self._client()
@@ -997,23 +1132,41 @@ exec python3 agent/server_agent.py --config agent/agent.json
             return
         command = {"type": "start", "job_id": uuid.uuid4().hex, "config": job}
         # Keep the node allow-list aligned with the authorized target currently
-        # selected on the Stress page, then queue the start command in order.
+        # selected on the Stress page, then queue the start command on every
+        # selected agent. Each send is isolated so one offline node does not
+        # prevent the remaining servers from receiving the task.
         def dispatch():
-            client.send(agent_id, {"type": "sync_targets", "targets": [job["target"]]})
-            return client.send(agent_id, command)
+            results = []
+            for agent_id in agent_ids:
+                try:
+                    client.send(agent_id, {"type": "sync_targets", "targets": [job["target"]]})
+                    client.send(agent_id, command)
+                    results.append({"agent_id": agent_id, "ok": True})
+                except Exception as exc:
+                    results.append({"agent_id": agent_id, "ok": False, "error": str(exc)})
+            return results
         self._async("run", dispatch)
 
     def stop_job(self):
-        agent_id = self._selected_agent()
-        if not agent_id:
-            self._show_error(L("请先选择节点", "Select an agent first"))
+        agent_ids = self._selected_agents_ids()
+        if not agent_ids:
+            self._show_error(L("请先选择服务器节点", "Select at least one server agent first"))
             return
         try:
             client = self._client()
         except Exception as exc:
             self._show_error(str(exc))
             return
-        self._async("stop", lambda: client.send(agent_id, {"type": "stop"}))
+        def dispatch():
+            results = []
+            for agent_id in agent_ids:
+                try:
+                    client.send(agent_id, {"type": "stop"})
+                    results.append({"agent_id": agent_id, "ok": True})
+                except Exception as exc:
+                    results.append({"agent_id": agent_id, "ok": False, "error": str(exc)})
+            return results
+        self._async("stop", dispatch)
 
     def _on_result(self, action, value, error):
         self.refreshBtn.setEnabled(True)
@@ -1028,12 +1181,25 @@ exec python3 agent/server_agent.py --config agent/agent.json
             return
         if action == "list":
             self._agents = list(value or [])
-            self.agentCombo.clear()
-            for agent in self._agents:
-                state = L("在线", "online") if agent.get("online") else L("离线", "offline")
-                self.agentCombo.addItem(f"{agent.get('name', agent['agent_id'])} [{state}] — {agent['agent_id']}")
-            self.nodeStatus.setText(L(f"已加载 {len(self._agents)} 个节点",
-                                      f"Loaded {len(self._agents)} agent(s)"))
+            self._updating_combo = True
+            try:
+                self.agentCombo.clear()
+                for agent in self._agents:
+                    state = L("在线", "online") if agent.get("online") else L("离线", "offline")
+                    self.agentCombo.addItem(f"{agent.get('name', agent['agent_id'])} [{state}] — {agent['agent_id']}")
+            finally:
+                self._updating_combo = False
+            # Remove agents that no longer exist while preserving a valid
+            # multi-selection after a refresh.
+            available_ids = {str(agent.get("agent_id") or "") for agent in self._agents}
+            self._selected_agent_ids.intersection_update(available_ids)
+            if self._multi_selection_active:
+                self.nodeStatus.setText(L(f"已选择 {len(self._selected_agent_ids)} 个节点",
+                                          f"{len(self._selected_agent_ids)} agent(s) selected"))
+            else:
+                self.nodeStatus.setText(L(f"已加载 {len(self._agents)} 个节点",
+                                          f"Loaded {len(self._agents)} agent(s)"))
+            self._update_selection_summary()
             self._log(L(f"已刷新节点列表，共 {len(self._agents)} 个节点。",
                                   f"Agent list refreshed: {len(self._agents)} agent(s)."))
             for agent in self._agents:
@@ -1045,11 +1211,19 @@ exec python3 agent/server_agent.py --config agent/agent.json
             self._emit_selected_remote_event(force=True)
         elif action == "poll_status":
             self._agents = list(value or [])
+            available_ids = {str(agent.get("agent_id") or "") for agent in self._agents}
+            self._selected_agent_ids.intersection_update(available_ids)
+            if self._multi_selection_active:
+                self.nodeStatus.setText(L(f"已选择 {len(self._selected_agent_ids)} 个节点",
+                                          f"{len(self._selected_agent_ids)} agent(s) selected"))
+                self._update_selection_summary()
             self._update_agent_status_widgets()
             self._emit_selected_remote_event()
             if self._last_poll_error:
                 self._log(L("服务器节点状态恢复刷新。", "Server-agent status polling recovered."))
             self._last_poll_error = ""
+        elif action in {"run", "stop"}:
+            self._show_batch_result(action, value or [])
         else:
             if action in {"generate", "generate_offline", "generate_relay"}:
                 self._log(L(f"节点安装包已生成：{value['path']}",
@@ -1075,6 +1249,34 @@ exec python3 agent/server_agent.py --config agent/agent.json
             else:
                 InfoBar.success(L("已发送", "Sent"), L("命令已发送到控制通道", "Command sent to the control channel"),
                                 parent=self, position=InfoBarPosition.TOP)
+
+    def _show_batch_result(self, action, results):
+        """Log and display per-node outcomes for a batch operation."""
+        results = list(results or [])
+        succeeded = [item for item in results if item.get("ok")]
+        failed = [item for item in results if not item.get("ok")]
+        verb = L("启动", "start") if action == "run" else L("停止", "stop")
+        for item in failed:
+            self._log(L(
+                f"节点 {item.get('agent_id', '-')} {verb}失败：{item.get('error', '未知错误')}",
+                f"Agent {item.get('agent_id', '-')} failed to {verb}: {item.get('error', 'unknown error')}"))
+        self._log(L(
+            f"已向 {len(succeeded)} 个节点发送{verb}命令，失败 {len(failed)} 个。",
+            f"Sent {verb} command to {len(succeeded)} agent(s); {len(failed)} failed."))
+        if failed and succeeded:
+            InfoBar.warning(L("批量操作部分完成", "Batch operation partially completed"),
+                            L(f"成功 {len(succeeded)} 个，失败 {len(failed)} 个。",
+                              f"{len(succeeded)} succeeded, {len(failed)} failed."),
+                            parent=self, position=InfoBarPosition.TOP)
+        elif failed:
+            InfoBar.error(L("批量操作失败", "Batch operation failed"),
+                          L(f"没有节点成功执行{verb}命令。", f"No agent accepted the {verb} command."),
+                          parent=self, position=InfoBarPosition.TOP)
+        else:
+            InfoBar.success(L("批量操作已发送", "Batch operation sent"),
+                            L(f"已向 {len(succeeded)} 个节点发送{verb}命令。",
+                              f"Sent the {verb} command to {len(succeeded)} agent(s)."),
+                            parent=self, position=InfoBarPosition.TOP)
 
     def _update_agent_status_widgets(self):
         total_req = total_ok = total_tx = 0
@@ -1119,10 +1321,14 @@ exec python3 agent/server_agent.py --config agent/agent.json
         self.nodeListLabel.setText("  |  ".join(parts) if parts else L("（暂无节点连接）", "(no nodes connected)"))
 
     def _emit_selected_remote_event(self, force=False):
-        idx = self.agentCombo.currentIndex()
-        if not 0 <= idx < len(self._agents):
+        selected_id = self._selected_agent()
+        if not selected_id:
             return
-        event = dict(self._agents[idx].get("last_event") or {})
+        agent = next((item for item in self._agents
+                      if str(item.get("agent_id") or "") == selected_id), None)
+        if agent is None:
+            return
+        event = dict(agent.get("last_event") or {})
         if not event:
             return
         key = self._remote_status_key(event)

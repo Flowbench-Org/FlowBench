@@ -77,7 +77,7 @@ powershell -File build_all.ps1
 
 # 2. Create the installer (requires Inno Setup 6.7 or later)
 ISCC.exe installer.iss
-# Output: installer/FlowBench-Setup-1.2.5.exe
+# Output: installer/FlowBench-Setup-1.2.6.exe
 ```
 
 `app.ico` is the fixed icon for executables, shortcuts, the installer and the system tray.
@@ -161,7 +161,7 @@ powershell -File build_all.ps1
 
 # 2. 制作安装程序（需安装 Inno Setup 6.7 或更高版本）
 ISCC.exe installer.iss
-# 产物位于 installer/FlowBench-Setup-1.2.5.exe
+# 产物位于 installer/FlowBench-Setup-1.2.6.exe
 ```
 
 `app.ico` 固定用于 EXE、快捷方式、安装程序和系统托盘，不随主题切换。
