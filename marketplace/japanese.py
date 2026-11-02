@@ -162,6 +162,7 @@ _RESOURCES = [
     ('現在の検索結果のサーバーをすべて選択', '选中当前搜索结果中的全部服务器', 'Select every server in the current search results'),
     ('現在の検索結果の選択を解除', '取消当前搜索结果中的选择', 'Unselect the servers in the current search results'),
     ('一致するサーバーはありません', '没有匹配的服务器', 'No matching servers'),
+    ('不明な OS', '未知系统', 'Unknown OS'),
     ('サーバーノードの選択をクリアしました。', '已清空服务器节点选择。', 'Cleared server-agent selection.'),
     ('サーバーノードを更新して 1 台以上選択してください', '请先刷新并选择服务器节点', 'Refresh and select at least one server agent first'),
     ('サーバーノードを 1 台以上選択してください', '请先选择服务器节点', 'Select at least one server agent first'),

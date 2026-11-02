@@ -20,8 +20,8 @@ import zipfile
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from PySide6.QtCore import QTimer, Signal
-from PySide6.QtGui import QColor, QGuiApplication
+from PySide6.QtCore import QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter, QPen
 from PySide6.QtWidgets import (QBoxLayout, QFileDialog, QGridLayout, QHBoxLayout,
                                QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 from qfluentwidgets import (BodyLabel, CaptionLabel, CheckBox, ComboBox, FluentIcon as FIF,
@@ -30,7 +30,7 @@ from qfluentwidgets import (BodyLabel, CaptionLabel, CheckBox, ComboBox, FluentI
                             InfoBarPosition, LineEdit, PasswordLineEdit,
                             PrimaryPushButton, PushButton, ScrollArea, SearchLineEdit,
                             SimpleCardWidget, StrongBodyLabel, SubtitleLabel,
-                            isDarkTheme, Theme)
+                            getFont, isDarkTheme, themeColor, Theme)
 
 from app.services.agent_control import ControllerClient, RelayControllerClient
 from app.services.auth import add_authorized, build_http_url, is_authorized, normalize_host
@@ -71,13 +71,173 @@ def agent_matches(agent, query) -> bool:
     return all(term in haystack for term in terms)
 
 
+def agent_os(agent) -> str:
+    """Return "windows", "linux" or "" from the platform string the agent reports."""
+    platform_name = str((agent.get("metadata") or {}).get("platform") or "").casefold()
+    if "windows" in platform_name:
+        return "windows"
+    if "linux" in platform_name:
+        return "linux"
+    return ""
+
+
+def _paint_os_badge(painter, rect, os_name):
+    """Draw a rounded OS badge: Windows panes, a small Tux, or a generic server."""
+    painter.save()
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.translate(rect.topLeft())
+    painter.scale(rect.width() / 34, rect.height() / 34)
+    badge = QRectF(0, 0, 34, 34)
+    if os_name == "windows":
+        painter.setBrush(QColor("#0078D4"))
+        painter.drawRoundedRect(badge, 8, 8)
+        painter.setBrush(QColor("#FFFFFF"))
+        for x, y in ((9, 9), (17.6, 9), (9, 17.6), (17.6, 17.6)):
+            painter.drawRect(QRectF(x, y, 7.4, 7.4))
+    elif os_name == "linux":
+        painter.setBrush(QColor("#FFC83D"))
+        painter.drawRoundedRect(badge, 8, 8)
+        painter.setBrush(QColor("#1F1F1F"))
+        painter.drawEllipse(QRectF(9.5, 4.5, 15, 24))           # body
+        painter.setBrush(QColor("#FFFFFF"))
+        painter.drawEllipse(QRectF(12.2, 12.5, 9.6, 14.5))      # belly
+        painter.drawEllipse(QRectF(13.2, 7.6, 3.4, 4.4))        # eyes
+        painter.drawEllipse(QRectF(17.4, 7.6, 3.4, 4.4))
+        painter.setBrush(QColor("#1F1F1F"))
+        painter.drawEllipse(QRectF(14.6, 9.2, 1.6, 2.2))        # pupils
+        painter.drawEllipse(QRectF(17.8, 9.2, 1.6, 2.2))
+        painter.setBrush(QColor("#F7931E"))
+        painter.drawEllipse(QRectF(14.3, 11.6, 5.4, 3.0))       # beak
+        painter.drawEllipse(QRectF(9.0, 26.4, 7.6, 3.8))        # feet
+        painter.drawEllipse(QRectF(17.4, 26.4, 7.6, 3.8))
+    else:
+        painter.setBrush(QColor("#5C6670"))
+        painter.drawRoundedRect(badge, 8, 8)
+        painter.setBrush(QColor("#FFFFFF"))
+        painter.drawRoundedRect(QRectF(9, 9.5, 16, 6.5), 1.6, 1.6)
+        painter.drawRoundedRect(QRectF(9, 18, 16, 6.5), 1.6, 1.6)
+        painter.setBrush(QColor("#5C6670"))
+        painter.drawEllipse(QRectF(11.2, 11.9, 1.8, 1.8))
+        painter.drawEllipse(QRectF(11.2, 20.4, 1.8, 1.8))
+    painter.restore()
+
+
+class AgentRow(QWidget):
+    """One selectable server: checkbox, OS badge, name, details and online pill."""
+
+    HEIGHT = 60
+
+    def __init__(self, agent, check, parent=None):
+        super().__init__(parent)
+        self.agent = agent
+        self.check = check
+        self.os_name = agent_os(agent)
+        self._hover = False
+        self.setFixedHeight(self.HEIGHT)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(14, 0, 14, 0)
+        check.setParent(self)
+        # Fluent's CheckBox stylesheet enforces min-width 28px + 1px margin; the
+        # OS badge is painted at x=48, so keep the box to exactly that footprint.
+        check.setFixedWidth(29)
+        layout.addWidget(check)
+        layout.addStretch(1)
+        check.stateChanged.connect(self.update)
+
+        agent_id = str(agent.get("agent_id") or "")
+        metadata = agent.get("metadata") or {}
+        hostname = str(metadata.get("hostname") or "").strip()
+        os_label = {"windows": "Windows", "linux": "Linux"}.get(self.os_name, L("未知系统", "Unknown OS"))
+        self.title = str(agent.get("name") or agent_id)
+        self.details = " · ".join(part for part in (os_label, hostname, agent_id) if part)
+        self.online = bool(agent.get("online"))
+        self.status = L("在线", "online") if self.online else L("离线", "offline")
+        platform_name = str(metadata.get("platform") or "").strip()
+        self.setToolTip("\n".join(part for part in (self.title, self.details, platform_name) if part))
+        self.setAccessibleName(f"{self.title} — {self.details} — {self.status}")
+
+    def enterEvent(self, event):
+        self._hover = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._hover = False
+        self.update()
+        super().leaveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.position().toPoint()):
+            self.check.toggle()
+        super().mouseReleaseEvent(event)
+
+    def _pill_colors(self, dark):
+        if self.online:
+            return ((QColor(108, 203, 95, 40), QColor("#6CCB5F"), QColor("#6CCB5F")) if dark
+                    else (QColor(16, 124, 16, 26), QColor("#0F7B0F"), QColor("#13A10E")))
+        return ((QColor(255, 255, 255, 20), QColor("#C8C8C8"), QColor("#9A9A9A")) if dark
+                else (QColor(0, 0, 0, 14), QColor("#5F5F5F"), QColor("#A0A0A0")))
+
+    def paintEvent(self, event):
+        dark = isDarkTheme()
+        painter = QPainter(self)
+        painter.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing)
+        card = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        accent = QColor(themeColor())
+        if self.check.isChecked():
+            fill = QColor(accent)
+            fill.setAlpha(46 if dark else 22)
+            border = QColor(accent)
+            border.setAlpha(170 if dark else 150)
+        else:
+            fill = (QColor(255, 255, 255, 18 if self._hover else 10) if dark
+                    else QColor(0, 0, 0, 10 if self._hover else 4))
+            border = QColor(255, 255, 255, 22) if dark else QColor(0, 0, 0, 20)
+        painter.setPen(QPen(border, 1))
+        painter.setBrush(fill)
+        painter.drawRoundedRect(card, 8, 8)
+
+        _paint_os_badge(painter, QRectF(48, (self.HEIGHT - 34) / 2, 34, 34), self.os_name)
+
+        pill_font = getFont(12)
+        pill_metrics = QFontMetrics(pill_font)
+        pill_width = 26 + pill_metrics.horizontalAdvance(self.status)
+        pill = QRectF(self.width() - 14 - pill_width, (self.HEIGHT - 22) / 2, pill_width, 22)
+        pill_fill, pill_text, dot = self._pill_colors(dark)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(pill_fill)
+        painter.drawRoundedRect(pill, 11, 11)
+        painter.setBrush(dot)
+        painter.drawEllipse(QRectF(pill.left() + 9, pill.center().y() - 3, 6, 6))
+        painter.setFont(pill_font)
+        painter.setPen(pill_text)
+        painter.drawText(pill.adjusted(19, 0, -7, 0), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                         self.status)
+
+        text_left = 48 + 34 + 12
+        text_width = max(0, int(pill.left() - 12 - text_left))
+        title_font = getFont(14, QFont.Weight.DemiBold)
+        painter.setFont(title_font)
+        painter.setPen(QColor("#FFFFFF") if dark else QColor("#1B1B1B"))
+        painter.drawText(QRectF(text_left, 10, text_width, 21),
+                         Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                         QFontMetrics(title_font).elidedText(self.title, Qt.TextElideMode.ElideRight, text_width))
+        detail_font = getFont(12)
+        painter.setFont(detail_font)
+        painter.setPen(QColor(255, 255, 255, 160) if dark else QColor(0, 0, 0, 150))
+        painter.drawText(QRectF(text_left, 31, text_width, 18),
+                         Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                         QFontMetrics(detail_font).elidedText(self.details, Qt.TextElideMode.ElideMiddle, text_width))
+
+
 class AgentSelectionDialog(MessageBoxBase):
     """Dialog for searching and selecting server agents for one operation."""
 
     def __init__(self, agents, selected_ids=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle(L("选择服务器节点", "Select Server Agents"))
-        self.widget.setMinimumWidth(560)
+        self.widget.setMinimumWidth(600)
         FluentStyleSheet.DIALOG.apply(self, Theme.DARK if isDarkTheme() else Theme.LIGHT)
         self.setMaskColor(QColor(0, 0, 0, 120) if isDarkTheme() else QColor(0, 0, 0, 76))
         self.yesButton.setText(L("应用选择", "Apply selection"))
@@ -113,38 +273,43 @@ class AgentSelectionDialog(MessageBoxBase):
         self.viewLayout.addLayout(actions)
 
         self._checks = {}
-        self._agents_by_id = {}
+        self._rows = {}
         selected = {str(value) for value in (selected_ids or [])}
-        content = QWidget(self.widget)
+        content = QWidget()
+        content.setObjectName("agentSelectionList")
+        content.setStyleSheet("#agentSelectionList { background: transparent; }")
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(4, 4, 4, 4)
+        # Right margin leaves room for Fluent's overlay scrollbar beside the cards.
+        content_layout.setContentsMargins(0, 2, 12, 2)
         content_layout.setSpacing(6)
         for agent in agents or []:
             agent_id = str(agent.get("agent_id") or "").strip()
             if not agent_id:
                 continue
-            state = L("在线", "online") if agent.get("online") else L("离线", "offline")
-            label = f"{agent.get('name') or agent_id} [{state}] — {agent_id}"
-            hostname = str((agent.get("metadata") or {}).get("hostname") or "").strip()
-            check = CheckBox(label, content)
-            if hostname:
-                check.setToolTip(L(f"主机名：{hostname}", f"Hostname: {hostname}"))
+            check = CheckBox("", content)
             check.setChecked(agent_id in selected)
             check.stateChanged.connect(self._update_count)
+            row = AgentRow(agent, check, content)
             self._checks[agent_id] = check
-            self._agents_by_id[agent_id] = agent
-            content_layout.addWidget(check)
+            self._rows[agent_id] = row
+            content_layout.addWidget(row)
         if not self._checks:
             empty = CaptionLabel(L("请先刷新服务器节点列表", "Refresh the server list first"), content)
+            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty.setMinimumHeight(AgentRow.HEIGHT)
             content_layout.addWidget(empty)
             self.searchEdit.setEnabled(False)
         self.noMatchLabel = CaptionLabel(L("没有匹配的服务器", "No matching servers"), content)
+        self.noMatchLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.noMatchLabel.setMinimumHeight(AgentRow.HEIGHT)
         self.noMatchLabel.hide()
         content_layout.addWidget(self.noMatchLabel)
         content_layout.addStretch(1)
-        scroll = QScrollArea(self.widget)
+        scroll = ScrollArea(self.widget)
         scroll.setWidgetResizable(True)
-        scroll.setMinimumHeight(180)
+        scroll.enableTransparentBackground()
+        visible_rows = max(2, min(len(self._rows), 5))
+        scroll.setFixedHeight(visible_rows * (AgentRow.HEIGHT + 6) + 4)
         scroll.setWidget(content)
         self.viewLayout.addWidget(scroll)
         self._update_count()
@@ -153,16 +318,16 @@ class AgentSelectionDialog(MessageBoxBase):
     def _apply_filter(self, *_):
         query = self.searchEdit.text()
         visible = 0
-        for agent_id, check in self._checks.items():
-            match = agent_matches(self._agents_by_id[agent_id], query)
-            check.setHidden(not match)
+        for row in self._rows.values():
+            match = agent_matches(row.agent, query)
+            row.setHidden(not match)
             visible += match
-        self.noMatchLabel.setHidden(not self._checks or visible > 0)
+        self.noMatchLabel.setHidden(not self._rows or visible > 0)
         self._update_count()
 
     def visible_ids(self):
         """IDs of the servers shown by the current search, in display order."""
-        return [agent_id for agent_id, check in self._checks.items() if not check.isHidden()]
+        return [agent_id for agent_id, row in self._rows.items() if not row.isHidden()]
 
     def _set_all(self, checked):
         # Act on the search results only, so "search hk → Select all" picks

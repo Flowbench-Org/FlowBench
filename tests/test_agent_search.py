@@ -1,5 +1,6 @@
 import copy
 import os
+import re
 import tempfile
 import unittest
 
@@ -10,8 +11,12 @@ from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QApplication, QWidget
 
+from PySide6.QtCore import QPoint
+from PySide6.QtTest import QTest
+from qfluentwidgets import Theme, isDarkTheme, setTheme
+
 from app.services.settings import settings
-from app.ui.agent_view import AgentSelectionDialog, agent_matches
+from app.ui.agent_view import AgentSelectionDialog, agent_matches, agent_os
 
 
 AGENTS = [
@@ -56,6 +61,22 @@ class AgentMatchTests(unittest.TestCase):
     def test_missing_fields_do_not_crash(self):
         self.assertTrue(agent_matches({"agent_id": "bare"}, "bare"))
         self.assertTrue(agent_matches({"agent_id": "bare", "metadata": None, "last_event": None}, "offline"))
+
+
+class AgentOsTests(unittest.TestCase):
+    def test_detects_os_from_reported_platform(self):
+        cases = {
+            "Linux-5.15.0-91-generic-x86_64-with-glibc2.35": "linux",
+            "Windows-10-10.0.20348-SP0": "windows",
+            "Windows-11-10.0.22631-SP0": "windows",
+            "macOS-14.4-arm64-arm-64bit": "",
+            "": "",
+        }
+        for platform_name, expected in cases.items():
+            with self.subTest(platform=platform_name):
+                self.assertEqual(agent_os({"metadata": {"platform": platform_name}}), expected)
+        self.assertEqual(agent_os({}), "")
+        self.assertEqual(agent_os({"metadata": None}), "")
 
 
 class AgentSelectionDialogSearchTests(unittest.TestCase):
@@ -134,6 +155,49 @@ class AgentSelectionDialogSearchTests(unittest.TestCase):
         dialog = self.make_dialog(agents=[])
         self.assertFalse(dialog.searchEdit.isEnabled())
         self.assertTrue(dialog.noMatchLabel.isHidden())
+
+    def test_rows_show_os_details_and_status(self):
+        dialog = self.make_dialog()
+        hk1, hk2, us = (dialog._rows[agent_id] for agent_id in ("a-hk-01", "a-hk-02", "a-us-01"))
+        self.assertEqual((hk1.os_name, hk2.os_name, us.os_name), ("linux", "", "windows"))
+        self.assertEqual(hk1.title, "server-hk-01")
+        self.assertEqual(hk1.details, "Linux · vps-hongkong · a-hk-01")
+        self.assertEqual(hk2.details, "Unknown OS · vps-hongkong-2 · a-hk-02")
+        self.assertEqual((hk1.status, hk2.status), ("online", "offline"))
+
+    def test_english_rows_have_no_chinese_text(self):
+        dialog = self.make_dialog()
+        han = re.compile(r"[㐀-鿿]")
+        for row in dialog._rows.values():
+            for text in (row.title, row.details, row.status, row.toolTip()):
+                self.assertIsNone(han.search(text), text)
+
+    def test_clicking_a_row_toggles_its_checkbox(self):
+        dialog = self.make_dialog()
+        dialog.parent().show()
+        dialog.show()
+        self.app.processEvents()
+        row = dialog._rows["a-us-01"]
+        self.assertGreater(row.width(), 200)
+        self.assertFalse(row.check.isChecked())
+        # Click on the server name, well away from the checkbox itself.
+        point = QPoint(row.width() // 2, row.height() // 2)
+        QTest.mouseClick(row, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
+        self.assertTrue(row.check.isChecked())
+        self.assertEqual(dialog.selected_ids(), ["a-us-01"])
+        QTest.mouseClick(row, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
+        self.assertEqual(dialog.selected_ids(), [])
+
+    def test_rows_render_in_light_and_dark_themes(self):
+        was_dark = isDarkTheme()
+        self.addCleanup(setTheme, Theme.DARK if was_dark else Theme.LIGHT)
+        for theme in (Theme.LIGHT, Theme.DARK):
+            setTheme(theme)
+            dialog = self.make_dialog(selected=["a-hk-01"])
+            for row in dialog._rows.values():
+                row.resize(560, row.HEIGHT)
+                with self.subTest(theme=theme, agent=row.agent["agent_id"]):
+                    self.assertFalse(row.grab().isNull())
 
 
 if __name__ == "__main__":
