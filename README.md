@@ -71,6 +71,15 @@ python main.py
 
 ### Build from Source
 
+One step (stops at the first failure and prints the installer path):
+
+```bash
+powershell -ExecutionPolicy Bypass -File build_installer.ps1
+# Output: installer/FlowBench-Setup-1.2.6.exe
+```
+
+Or step by step:
+
 ```bash
 # 1. Build the server utilities and GUI with all icon/logo resources
 powershell -File build_all.ps1
@@ -154,6 +163,15 @@ python main.py
 ```
 
 ### 从源码打包
+
+一键打包（任一步失败立即停止，成功后打印安装包路径）：
+
+```bash
+powershell -ExecutionPolicy Bypass -File build_installer.ps1
+# 产物位于 installer/FlowBench-Setup-1.2.6.exe
+```
+
+或分步执行：
 
 ```bash
 # 1. 生成服务器工具与主程序，包含全部图标和启动图资源
