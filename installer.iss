@@ -1,7 +1,7 @@
 ; FlowBench Installer Script (Inno Setup 6.7 or later)
 ; 中英双语安装程序
 #define MyAppName "FlowBench"
-#define MyAppVersion "1.2.6"
+#define MyAppVersion "1.2.7"
 #define MyAppPublisher "FlowBench"
 #define MyAppExeName "FlowBench.exe"
 #define MyAppDirName "FlowBench"

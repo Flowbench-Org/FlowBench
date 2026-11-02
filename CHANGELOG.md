@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.2.7] - 2026-11-02
+
+### Added
+
+- Added search to the Server Agents multi-select panel: filter by name, ID, hostname, platform, or online status with space-separated terms; Select All and Clear act on the visible results only.
+- Restyled the server checklist with Windows/Linux icons, hostname details, and online/offline status pills in place of the plain gray list.
+- Added `build_installer.ps1` to build the installer in one step, checking PyInstaller, Inno Setup, and version consistency before the build starts.
+- Updated the Japanese language pack to 1.0.2 with translations for the search and server-row text.
+
+### Fixed
+
+- Releasing a mouse drag over a server row no longer toggles that row; a click must start and end on the same row.
+- Duplicate agent IDs now appear once instead of leaving an extra row that search and Select All ignored.
+- Malformed agent metadata no longer prevents the selection panel from opening.
+- Rows hidden by a search no longer keep their hover highlight when shown again.
+- `build_all.ps1` and `build_agent.ps1` now stop at the first failed PyInstaller run instead of continuing with stale or missing outputs.
+
+### Verified
+
+- Verified scrolling and mouse-wheel input with 60 servers and responsive search with 300.
+- Passed the full automated test suite (75 tests, 1616 subtests).
+
 ## [1.2.6] - 2026-10-24
 
 ### Added

@@ -1,4 +1,4 @@
-"""Standalone Japanese interface pack for FlowBench 1.2.6.
+"""Standalone Japanese interface pack for FlowBench 1.2.7.
 
 Import this file from the local plugin page. Enable only one language pack
 at a time. Disable the pack and restart to fully restore the host language.
@@ -1017,8 +1017,8 @@ class Plugin(FlowBenchPlugin):
     version = "1.0.2"
     author = "FlowBench"
     description = (
-        "将 FlowBench 1.2.6 的界面、对话框和动态提示转换为日语，兼容深浅色主题；启用即生效。",
-        "Japanese UI, dialogs and dynamic messages for FlowBench 1.2.6; supports light and dark themes."
+        "将 FlowBench 1.2.7 的界面、对话框和动态提示转换为日语，兼容深浅色主题；启用即生效。",
+        "Japanese UI, dialogs and dynamic messages for FlowBench 1.2.7; supports light and dark themes."
     )
     icon = "LANGUAGE"
     category = "ui"

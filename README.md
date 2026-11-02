@@ -75,7 +75,7 @@ One step (stops at the first failure and prints the installer path):
 
 ```bash
 powershell -ExecutionPolicy Bypass -File build_installer.ps1
-# Output: installer/FlowBench-Setup-1.2.6.exe
+# Output: installer/FlowBench-Setup-1.2.7.exe
 ```
 
 Or step by step:
@@ -86,7 +86,7 @@ powershell -File build_all.ps1
 
 # 2. Create the installer (requires Inno Setup 6.7 or later)
 ISCC.exe installer.iss
-# Output: installer/FlowBench-Setup-1.2.6.exe
+# Output: installer/FlowBench-Setup-1.2.7.exe
 ```
 
 `app.ico` is the fixed icon for executables, shortcuts, the installer and the system tray.
@@ -168,7 +168,7 @@ python main.py
 
 ```bash
 powershell -ExecutionPolicy Bypass -File build_installer.ps1
-# 产物位于 installer/FlowBench-Setup-1.2.6.exe
+# 产物位于 installer/FlowBench-Setup-1.2.7.exe
 ```
 
 或分步执行：
@@ -179,7 +179,7 @@ powershell -File build_all.ps1
 
 # 2. 制作安装程序（需安装 Inno Setup 6.7 或更高版本）
 ISCC.exe installer.iss
-# 产物位于 installer/FlowBench-Setup-1.2.6.exe
+# 产物位于 installer/FlowBench-Setup-1.2.7.exe
 ```
 
 `app.ico` 固定用于 EXE、快捷方式、安装程序和系统托盘，不随主题切换。
