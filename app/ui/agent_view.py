@@ -43,14 +43,19 @@ from app.ui.stress_view import HIGH_RATE, MiniStat, fmt_bytes
 DEFAULT_AGENT_RELAY = "mqtt://broker.hivemq.com:8000"
 
 
+def _as_dict(value) -> dict:
+    """Agent payloads come from remote nodes; treat malformed sub-objects as empty."""
+    return value if isinstance(value, dict) else {}
+
+
 def agent_search_text(agent) -> str:
     """Return the lower-cased text a server agent can be searched by.
 
     Covers the display name, agent ID, online state (both UI languages),
     host metadata reported by the agent, and the last job state.
     """
-    metadata = agent.get("metadata") or {}
-    event = agent.get("last_event") or {}
+    metadata = _as_dict(agent.get("metadata"))
+    event = _as_dict(agent.get("last_event"))
     parts = [
         agent.get("name"),
         agent.get("agent_id"),
@@ -73,7 +78,7 @@ def agent_matches(agent, query) -> bool:
 
 def agent_os(agent) -> str:
     """Return "windows", "linux" or "" from the platform string the agent reports."""
-    platform_name = str((agent.get("metadata") or {}).get("platform") or "").casefold()
+    platform_name = str(_as_dict(agent.get("metadata")).get("platform") or "").casefold()
     if "windows" in platform_name:
         return "windows"
     if "linux" in platform_name:
@@ -133,6 +138,7 @@ class AgentRow(QWidget):
         self.check = check
         self.os_name = agent_os(agent)
         self._hover = False
+        self._pressed = False
         self.setFixedHeight(self.HEIGHT)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         layout = QHBoxLayout(self)
@@ -146,7 +152,7 @@ class AgentRow(QWidget):
         check.stateChanged.connect(self.update)
 
         agent_id = str(agent.get("agent_id") or "")
-        metadata = agent.get("metadata") or {}
+        metadata = _as_dict(agent.get("metadata"))
         hostname = str(metadata.get("hostname") or "").strip()
         os_label = {"windows": "Windows", "linux": "Linux"}.get(self.os_name, L("未知系统", "Unknown OS"))
         self.title = str(agent.get("name") or agent_id)
@@ -167,8 +173,22 @@ class AgentRow(QWidget):
         self.update()
         super().leaveEvent(event)
 
+    def hideEvent(self, event):
+        # A search can hide the row under the cursor without a leave event.
+        self._hover = False
+        self._pressed = False
+        super().hideEvent(event)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._pressed = True
+        super().mousePressEvent(event)
+
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.position().toPoint()):
+        # Toggle only for a full click on this row, not a drag that ends here.
+        pressed, self._pressed = self._pressed, False
+        if (pressed and event.button() == Qt.MouseButton.LeftButton
+                and self.rect().contains(event.position().toPoint())):
             self.check.toggle()
         super().mouseReleaseEvent(event)
 
@@ -284,7 +304,7 @@ class AgentSelectionDialog(MessageBoxBase):
         content_layout.setSpacing(6)
         for agent in agents or []:
             agent_id = str(agent.get("agent_id") or "").strip()
-            if not agent_id:
+            if not agent_id or agent_id in self._rows:
                 continue
             check = CheckBox("", content)
             check.setChecked(agent_id in selected)
@@ -305,13 +325,14 @@ class AgentSelectionDialog(MessageBoxBase):
         self.noMatchLabel.hide()
         content_layout.addWidget(self.noMatchLabel)
         content_layout.addStretch(1)
-        scroll = ScrollArea(self.widget)
-        scroll.setWidgetResizable(True)
-        scroll.enableTransparentBackground()
+        # Show up to five rows; longer lists scroll inside this area.
+        self.scrollArea = ScrollArea(self.widget)
+        self.scrollArea.setWidgetResizable(True)
+        self.scrollArea.enableTransparentBackground()
         visible_rows = max(2, min(len(self._rows), 5))
-        scroll.setFixedHeight(visible_rows * (AgentRow.HEIGHT + 6) + 4)
-        scroll.setWidget(content)
-        self.viewLayout.addWidget(scroll)
+        self.scrollArea.setFixedHeight(visible_rows * (AgentRow.HEIGHT + 6) + 4)
+        self.scrollArea.setWidget(content)
+        self.viewLayout.addWidget(self.scrollArea)
         self._update_count()
         QTimer.singleShot(0, self.searchEdit.setFocus)
 

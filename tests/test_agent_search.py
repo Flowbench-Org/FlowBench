@@ -7,16 +7,14 @@ import unittest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("APPDATA", os.path.join(tempfile.gettempdir(), "FlowBench-agent-search-tests"))
 
-from PySide6.QtCore import QEvent, Qt
-from PySide6.QtGui import QKeyEvent
-from PySide6.QtWidgets import QApplication, QWidget
-
-from PySide6.QtCore import QPoint
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+from PySide6.QtGui import QEnterEvent, QKeyEvent, QMouseEvent, QWheelEvent
 from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QWidget
 from qfluentwidgets import Theme, isDarkTheme, setTheme
 
 from app.services.settings import settings
-from app.ui.agent_view import AgentSelectionDialog, agent_matches, agent_os
+from app.ui.agent_view import AgentRow, AgentSelectionDialog, agent_matches, agent_os
 
 
 AGENTS = [
@@ -187,6 +185,78 @@ class AgentSelectionDialogSearchTests(unittest.TestCase):
         self.assertEqual(dialog.selected_ids(), ["a-us-01"])
         QTest.mouseClick(row, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
         self.assertEqual(dialog.selected_ids(), [])
+
+    def show_dialog(self, dialog):
+        dialog.parent().show()
+        dialog.show()
+        for _ in range(5):
+            self.app.processEvents()
+
+    def test_many_servers_scroll_and_last_row_is_reachable(self):
+        agents = [{"agent_id": f"s-{i:02d}", "name": f"node-{i:02d}", "online": i % 2 == 0,
+                   "metadata": {"platform": "Linux-6.1"}} for i in range(60)]
+        dialog = self.make_dialog(agents=agents)
+        self.show_dialog(dialog)
+        area = dialog.scrollArea
+        self.assertLessEqual(area.height(), 5 * (AgentRow.HEIGHT + 6) + 4)
+        self.assertGreater(area.verticalScrollBar().maximum(), 0)
+        last = dialog._rows["s-59"]
+        area.verticalScrollBar().setValue(area.verticalScrollBar().maximum())
+        self.app.processEvents()
+        top = last.mapTo(area.viewport(), QPoint(0, 0)).y()
+        self.assertGreaterEqual(top, 0)
+        self.assertLessEqual(top + last.height(), area.viewport().height() + 1)
+
+    def test_rows_let_wheel_events_reach_the_scroll_area(self):
+        dialog = self.make_dialog()
+        row = dialog._rows["a-hk-01"]
+        for widget in (row, row.check):
+            center = QPointF(widget.width() / 2, widget.height() / 2)
+            event = QWheelEvent(center, widget.mapToGlobal(center), QPoint(0, 0), QPoint(0, -120),
+                                Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+                                Qt.ScrollPhase.NoScrollPhase, False)
+            QApplication.sendEvent(widget, event)
+            # Ignored events propagate to the scroll area for real (spontaneous) wheel input.
+            self.assertFalse(event.isAccepted(), type(widget).__name__)
+
+    def test_release_without_press_does_not_toggle(self):
+        dialog = self.make_dialog()
+        self.show_dialog(dialog)
+        row = dialog._rows["a-hk-02"]
+        point = QPointF(row.width() / 2, row.height() / 2)
+        release = QMouseEvent(QEvent.Type.MouseButtonRelease, point, row.mapToGlobal(point),
+                              Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier)
+        QApplication.sendEvent(row, release)
+        self.assertFalse(row.check.isChecked())
+
+    def test_duplicate_agent_ids_render_once(self):
+        dialog = self.make_dialog(agents=AGENTS + [dict(AGENTS[0], name="duplicate")])
+        self.assertEqual(len(dialog.findChildren(AgentRow)), 3)
+        self.assertEqual(dialog._rows["a-hk-01"].title, "server-hk-01")
+
+    def test_malformed_agent_data_does_not_crash(self):
+        agents = [
+            {"agent_id": "x1", "name": "x", "online": True, "metadata": "garbage", "last_event": ["bad"]},
+            {"agent_id": "x2", "name": None, "online": None, "metadata": None, "last_event": None},
+            {"agent_id": 12345, "name": 678, "online": True, "metadata": {"platform": None, "hostname": 99}},
+        ]
+        dialog = self.make_dialog(agents=agents)
+        self.assertEqual(list(dialog._rows), ["x1", "x2", "12345"])
+        dialog.searchEdit.setText("99")
+        self.assertEqual(dialog.visible_ids(), ["12345"])
+        for row in dialog._rows.values():
+            row.resize(560, row.HEIGHT)
+            self.assertFalse(row.grab().isNull())
+
+    def test_hover_is_cleared_when_search_hides_the_row(self):
+        dialog = self.make_dialog()
+        self.show_dialog(dialog)
+        row = dialog._rows["a-hk-02"]
+        QApplication.sendEvent(row, QEnterEvent(QPointF(5, 5), QPointF(5, 5), row.mapToGlobal(QPointF(5, 5))))
+        self.assertTrue(row._hover)
+        dialog.searchEdit.setText("a-us")
+        dialog.searchEdit.clear()
+        self.assertFalse(row._hover)
 
     def test_rows_render_in_light_and_dark_themes(self):
         was_dark = isDarkTheme()
