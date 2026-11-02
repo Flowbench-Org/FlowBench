@@ -28,7 +28,7 @@ from qfluentwidgets import (BodyLabel, CaptionLabel, CheckBox, ComboBox, FluentI
                             FluentStyleSheet, InfoBar,
                             MessageBoxBase,
                             InfoBarPosition, LineEdit, PasswordLineEdit,
-                            PrimaryPushButton, PushButton, ScrollArea,
+                            PrimaryPushButton, PushButton, ScrollArea, SearchLineEdit,
                             SimpleCardWidget, StrongBodyLabel, SubtitleLabel,
                             isDarkTheme, Theme)
 
@@ -43,8 +43,36 @@ from app.ui.stress_view import HIGH_RATE, MiniStat, fmt_bytes
 DEFAULT_AGENT_RELAY = "mqtt://broker.hivemq.com:8000"
 
 
+def agent_search_text(agent) -> str:
+    """Return the lower-cased text a server agent can be searched by.
+
+    Covers the display name, agent ID, online state (both UI languages),
+    host metadata reported by the agent, and the last job state.
+    """
+    metadata = agent.get("metadata") or {}
+    event = agent.get("last_event") or {}
+    parts = [
+        agent.get("name"),
+        agent.get("agent_id"),
+        "online 在线" if agent.get("online") else "offline 离线",
+        metadata.get("hostname"),
+        metadata.get("platform"),
+        event.get("state"),
+    ]
+    return " ".join(str(part) for part in parts if part).casefold()
+
+
+def agent_matches(agent, query) -> bool:
+    """True when every whitespace-separated term of ``query`` matches the agent."""
+    terms = str(query or "").casefold().split()
+    if not terms:
+        return True
+    haystack = agent_search_text(agent)
+    return all(term in haystack for term in terms)
+
+
 class AgentSelectionDialog(MessageBoxBase):
-    """Dialog for selecting several server agents for one operation."""
+    """Dialog for searching and selecting server agents for one operation."""
 
     def __init__(self, agents, selected_ids=None, parent=None):
         super().__init__(parent)
@@ -62,9 +90,19 @@ class AgentSelectionDialog(MessageBoxBase):
               "Select one, several, or all servers. Offline nodes can stay queued and run when they come online."),
             self.widget))
 
+        self.searchEdit = SearchLineEdit(self.widget)
+        self.searchEdit.setPlaceholderText(L("搜索名称、ID、主机名或状态（如 hk 在线）",
+                                             "Search name, ID, hostname or status (e.g. hk online)"))
+        self.searchEdit.textChanged.connect(self._apply_filter)
+        self.viewLayout.addWidget(self.searchEdit)
+
         actions = QHBoxLayout()
         self.selectAllBtn = PushButton(L("全选", "Select all"), self.widget)
         self.clearBtn = PushButton(L("清空", "Clear"), self.widget)
+        self.selectAllBtn.setToolTip(L("选中当前搜索结果中的全部服务器",
+                                       "Select every server in the current search results"))
+        self.clearBtn.setToolTip(L("取消当前搜索结果中的选择",
+                                   "Unselect the servers in the current search results"))
         self.selectedCount = CaptionLabel("", self.widget)
         self.selectAllBtn.clicked.connect(lambda: self._set_all(True))
         self.clearBtn.clicked.connect(lambda: self._set_all(False))
@@ -75,6 +113,7 @@ class AgentSelectionDialog(MessageBoxBase):
         self.viewLayout.addLayout(actions)
 
         self._checks = {}
+        self._agents_by_id = {}
         selected = {str(value) for value in (selected_ids or [])}
         content = QWidget(self.widget)
         content_layout = QVBoxLayout(content)
@@ -86,14 +125,22 @@ class AgentSelectionDialog(MessageBoxBase):
                 continue
             state = L("在线", "online") if agent.get("online") else L("离线", "offline")
             label = f"{agent.get('name') or agent_id} [{state}] — {agent_id}"
+            hostname = str((agent.get("metadata") or {}).get("hostname") or "").strip()
             check = CheckBox(label, content)
+            if hostname:
+                check.setToolTip(L(f"主机名：{hostname}", f"Hostname: {hostname}"))
             check.setChecked(agent_id in selected)
             check.stateChanged.connect(self._update_count)
             self._checks[agent_id] = check
+            self._agents_by_id[agent_id] = agent
             content_layout.addWidget(check)
         if not self._checks:
             empty = CaptionLabel(L("请先刷新服务器节点列表", "Refresh the server list first"), content)
             content_layout.addWidget(empty)
+            self.searchEdit.setEnabled(False)
+        self.noMatchLabel = CaptionLabel(L("没有匹配的服务器", "No matching servers"), content)
+        self.noMatchLabel.hide()
+        content_layout.addWidget(self.noMatchLabel)
         content_layout.addStretch(1)
         scroll = QScrollArea(self.widget)
         scroll.setWidgetResizable(True)
@@ -101,15 +148,36 @@ class AgentSelectionDialog(MessageBoxBase):
         scroll.setWidget(content)
         self.viewLayout.addWidget(scroll)
         self._update_count()
+        QTimer.singleShot(0, self.searchEdit.setFocus)
+
+    def _apply_filter(self, *_):
+        query = self.searchEdit.text()
+        visible = 0
+        for agent_id, check in self._checks.items():
+            match = agent_matches(self._agents_by_id[agent_id], query)
+            check.setHidden(not match)
+            visible += match
+        self.noMatchLabel.setHidden(not self._checks or visible > 0)
+        self._update_count()
+
+    def visible_ids(self):
+        """IDs of the servers shown by the current search, in display order."""
+        return [agent_id for agent_id, check in self._checks.items() if not check.isHidden()]
 
     def _set_all(self, checked):
-        for check in self._checks.values():
-            check.setChecked(checked)
+        # Act on the search results only, so "search hk → Select all" picks
+        # just the matching servers and keeps choices made under other searches.
+        for agent_id in self.visible_ids():
+            self._checks[agent_id].setChecked(checked)
         self._update_count()
 
     def _update_count(self, *_):
         count = len(self.selected_ids())
-        self.selectedCount.setText(L(f"已选择 {count} 个", f"{count} selected"))
+        text = L(f"已选择 {count} 个", f"{count} selected")
+        if self.searchEdit.text().strip() and self._checks:
+            shown, total = len(self.visible_ids()), len(self._checks)
+            text += L(f" · 显示 {shown}/{total}", f" · showing {shown}/{total}")
+        self.selectedCount.setText(text)
 
     def selected_ids(self):
         return [agent_id for agent_id, check in self._checks.items() if check.isChecked()]
@@ -341,8 +409,8 @@ class AgentView(ScrollArea):
         selection.addWidget(self.agentCombo, 1)
         self.selectAgentsBtn = PushButton(L("多选服务器…", "Select servers…"), control)
         self.selectAgentsBtn.setToolTip(L(
-            "打开面板选择多个服务器执行同一个任务。",
-            "Open a panel to select multiple servers for the same task."))
+            "打开面板搜索并选择一个或多个服务器执行同一个任务。",
+            "Open a panel to search and select one or more servers for the same task."))
         self.selectAgentsBtn.clicked.connect(self.select_agents)
         selection.addWidget(self.selectAgentsBtn)
         self.nodeStatus = CaptionLabel(L("未连接", "Not connected"), control)

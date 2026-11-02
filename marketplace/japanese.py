@@ -157,6 +157,11 @@ _RESOURCES = [
     ('サーバー一覧を先に更新してください', '请先刷新服务器节点列表', 'Refresh the server list first'),
     ('複数サーバーを選択…', '多选服务器…', 'Select servers…'),
     ('複数サーバーを選択して同じタスクを実行するパネルを開きます。', '打开面板选择多个服务器执行同一个任务。', 'Open a panel to select multiple servers for the same task.'),
+    ('パネルを開き、同じタスクを実行するサーバーを検索して 1 台以上選択します。', '打开面板搜索并选择一个或多个服务器执行同一个任务。', 'Open a panel to search and select one or more servers for the same task.'),
+    ('名前、ID、ホスト名、状態で検索（例: hk online）', '搜索名称、ID、主机名或状态（如 hk 在线）', 'Search name, ID, hostname or status (e.g. hk online)'),
+    ('現在の検索結果のサーバーをすべて選択', '选中当前搜索结果中的全部服务器', 'Select every server in the current search results'),
+    ('現在の検索結果の選択を解除', '取消当前搜索结果中的选择', 'Unselect the servers in the current search results'),
+    ('一致するサーバーはありません', '没有匹配的服务器', 'No matching servers'),
     ('サーバーノードの選択をクリアしました。', '已清空服务器节点选择。', 'Cleared server-agent selection.'),
     ('サーバーノードを更新して 1 台以上選択してください', '请先刷新并选择服务器节点', 'Refresh and select at least one server agent first'),
     ('サーバーノードを 1 台以上選択してください', '请先选择服务器节点', 'Select at least one server agent first'),
@@ -1008,7 +1013,7 @@ def uninstall():
 class Plugin(FlowBenchPlugin):
     name = ("日语语言包", "Japanese Language Pack")
     title = "日本語言語パック"
-    version = "1.0.1"
+    version = "1.0.2"
     author = "FlowBench"
     description = (
         "将 FlowBench 1.2.6 的界面、对话框和动态提示转换为日语，兼容深浅色主题；启用即生效。",
