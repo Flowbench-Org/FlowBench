@@ -59,7 +59,7 @@ Check the built-in `example_hello.py` / `example_dns.py` plugins in the plugin f
 2. Download the latest `FlowBench-Setup-x.x.x.exe`
 3. Run the installer and follow the wizard (desktop shortcut optional). It installs for the
    current user in `%LOCALAPPDATA%\Programs\FlowBench` without administrator rights, and removes
-   an older Inno Setup install (1.2.6 and earlier) automatically
+   an older Inno Setup install (1.2.7 and earlier) automatically
 4. Launch from the Start menu or desktop
 
 Later updates install from inside the app: **Settings → Check for Updates → Update now** downloads
@@ -81,7 +81,7 @@ One step (stops at the first failure and prints the installer path):
 
 ```bash
 powershell -ExecutionPolicy Bypass -File build_installer.ps1
-# Output: installer/FlowBench-Setup-1.2.7.exe
+# Output: installer/FlowBench-Setup-1.2.8.exe
 ```
 
 Only Python and PyInstaller are needed; the installer is FlowBench's own (`flowbench_installer/`),
@@ -95,7 +95,7 @@ powershell -File build_all.ps1
 python -m PyInstaller --clean --noconfirm Uninstall.spec
 python tools/make_payload.py
 python -m PyInstaller --clean --noconfirm Setup.spec
-# Output: dist/FlowBench-Setup-1.2.7.exe
+# Output: dist/FlowBench-Setup-1.2.8.exe
 ```
 
 To publish, upload `FlowBench-Setup-<version>.exe` to the GitHub release under exactly that
@@ -163,7 +163,7 @@ FlowBench v1.1.0 内置完整插件平台，可以自由扩展功能：
 1. 进入 [**Releases**](https://github.com/Carlown/FlowBench/releases/latest) 发布页
 2. 下载最新的 `FlowBench-Setup-x.x.x.exe`
 3. 双击运行，按向导完成安装（可勾选桌面快捷方式）。默认为当前用户安装到
-   `%LOCALAPPDATA%\Programs\FlowBench`，不需要管理员权限；检测到旧版（1.2.6 及以前的
+   `%LOCALAPPDATA%\Programs\FlowBench`，不需要管理员权限；检测到旧版（1.2.7 及以前的
    Inno Setup 安装）会自动卸载
 4. 安装后从开始菜单或桌面启动
 
@@ -186,7 +186,7 @@ python main.py
 
 ```bash
 powershell -ExecutionPolicy Bypass -File build_installer.ps1
-# 产物位于 installer/FlowBench-Setup-1.2.7.exe
+# 产物位于 installer/FlowBench-Setup-1.2.8.exe
 ```
 
 只需要 Python 和 PyInstaller。安装程序是 FlowBench 自己的（`flowbench_installer/`），
@@ -200,7 +200,7 @@ powershell -File build_all.ps1
 python -m PyInstaller --clean --noconfirm Uninstall.spec
 python tools/make_payload.py
 python -m PyInstaller --clean --noconfirm Setup.spec
-# 产物位于 dist/FlowBench-Setup-1.2.7.exe
+# 产物位于 dist/FlowBench-Setup-1.2.8.exe
 ```
 
 发布时把 `FlowBench-Setup-<版本号>.exe` 原名上传到 GitHub Release，软件内更新按这个文件名查找。

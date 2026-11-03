@@ -21,7 +21,7 @@ APP_NAME = "FlowBench"
 APP_USER_MODEL_ID = "FlowBench.App"          # must match main.py
 PUBLISHER = "FlowBench"
 UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\FlowBench"
-# Inno Setup builds up to 1.2.6, and the older NetPulse name.
+# Inno Setup builds up to 1.2.7, and the older NetPulse name.
 LEGACY_APP_IDS = (
     "{652A3085-2CA0-4898-B675-C69E34D5AE6D}_is1",
     "{8F4A2C1E-9B3D-4E6A-B5C7-1A2B3C4D5E6F}_is1",
@@ -283,7 +283,7 @@ def registered_install_dir() -> Optional[Path]:
 
 
 def find_legacy_installs() -> List[dict]:
-    """Inno Setup installs of FlowBench 1.2.6 and earlier (incl. NetPulse)."""
+    """Inno Setup installs of FlowBench 1.2.7 and earlier (incl. NetPulse)."""
     if not IS_WINDOWS:
         return []
     import winreg

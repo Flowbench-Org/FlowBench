@@ -1,15 +1,31 @@
 # Changelog
 
+## [1.2.8] - 2026-11-03
+
+### Added
+
+- Replaced Inno Setup with FlowBench's own installer (`flowbench_installer/`): a bilingual Fluent-style wizard that follows the light/dark theme, installs per user to `%LOCALAPPDATA%\Programs\FlowBench` without administrator rights, swaps the new files in only after they are fully extracted (a failed or cancelled install keeps the previous version), registers Start menu/desktop shortcuts with the FlowBench AppUserModelID and an entry in Settings → Apps, and removes an older Inno Setup install (1.2.7 and earlier) automatically.
+- Added in-app updates: **Update now** downloads the release installer with a progress bar (size and, when GitHub provides it, SHA-256 verified; Retry on failure), closes FlowBench, installs in place, and reopens FlowBench. A failed update reopens the existing version. Updating from 1.2.7 or earlier still needs one manual install of 1.2.8.
+- Added `FlowBench-Uninstall.exe`, which keeps settings and logs in `%APPDATA%\FlowBench`.
+- Updated the Japanese language pack to 1.0.3 with translations for the update download dialog.
+
+### Changed
+
+- `build_installer.ps1` now needs only Python and PyInstaller; `installer.iss` is removed. Upload `FlowBench-Setup-<version>.exe` to the GitHub release under that exact name for the in-app updater.
+
+### Verified
+
+- Built the uninstaller with PyInstaller and ran its two-stage uninstall end to end; covered install, upgrade, rollback, cancel, unsafe paths, legacy migration, update mode, and download verification with automated tests.
+- Checked the setup wizard and update window in Chinese and English, light and dark.
+- Passed the full automated test suite (109 tests, 1652 subtests).
+
 ## [1.2.7] - 2026-11-02
 
 ### Added
 
 - Added search to the Server Agents multi-select panel: filter by name, ID, hostname, platform, or online status with space-separated terms; Select All and Clear act on the visible results only.
 - Restyled the server checklist with Windows/Linux icons, hostname details, and online/offline status pills in place of the plain gray list.
-- Replaced Inno Setup with FlowBench's own installer (`flowbench_installer/`): a bilingual Fluent-style wizard that follows the light/dark theme, installs per user to `%LOCALAPPDATA%\Programs\FlowBench` without administrator rights, swaps the new files in only after they are fully extracted (a failed or cancelled install keeps the previous version), registers Start menu/desktop shortcuts with the FlowBench AppUserModelID and an entry in Settings → Apps, and removes an older Inno Setup install automatically.
-- Added in-app updates: **Update now** downloads the release installer with a progress bar (size and, when GitHub provides it, SHA-256 verified; Retry on failure), closes FlowBench, installs in place, and reopens FlowBench. A failed update reopens the existing version.
-- Added `FlowBench-Uninstall.exe`, which keeps settings and logs in `%APPDATA%\FlowBench`.
-- Added `build_installer.ps1` to build the installer in one step; only Python and PyInstaller are needed.
+- Added `build_installer.ps1` to build the installer in one step, checking PyInstaller, Inno Setup, and version consistency before the build starts.
 - Updated the Japanese language pack to 1.0.2 with translations for the search and server-row text.
 
 ### Fixed
@@ -23,8 +39,7 @@
 ### Verified
 
 - Verified scrolling and mouse-wheel input with 60 servers and responsive search with 300.
-- Built the uninstaller with PyInstaller and ran its two-stage uninstall end to end; covered install, upgrade, rollback, cancel, unsafe paths, legacy migration, update mode, and download verification with automated tests.
-- Passed the full automated test suite (109 tests, 1652 subtests).
+- Passed the full automated test suite (75 tests, 1616 subtests).
 
 ## [1.2.6] - 2026-10-24
 
