@@ -1,30 +1,11 @@
-# Build the Windows installer in one step:
-#   server utilities + GUI (build_all.ps1) -> Inno Setup (installer.iss)
+# Build the Windows installer in one step, using FlowBench's own installer
+# (flowbench_installer/) - Inno Setup is no longer needed:
+#   server utilities + GUI (build_all.ps1) -> uninstaller -> payload -> setup exe
 # Output: installer\FlowBench-Setup-<version>.exe
-# Needs: Python with requirements.txt and PyInstaller, plus Inno Setup 6.7+.
-# Set $env:ISCC to the full path of ISCC.exe if Inno Setup is installed
-# somewhere unusual.
+# Needs: Python with requirements.txt and PyInstaller.
 $ErrorActionPreference = "Stop"
 Set-Location -LiteralPath $PSScriptRoot
 $started = Get-Date
-
-function Find-Iscc {
-    if ($env:ISCC) {
-        if (Test-Path -LiteralPath $env:ISCC) { return $env:ISCC }
-        throw "ISCC is set to '$env:ISCC' but that file does not exist."
-    }
-    $cmd = Get-Command "ISCC.exe" -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Source }
-    $roots = @(${env:ProgramFiles(x86)}, $env:ProgramFiles)
-    if ($env:LOCALAPPDATA) { $roots += (Join-Path $env:LOCALAPPDATA "Programs") }
-    foreach ($root in ($roots | Where-Object { $_ })) {
-        foreach ($name in @("Inno Setup 7", "Inno Setup 6")) {
-            $path = Join-Path (Join-Path $root $name) "ISCC.exe"
-            if (Test-Path -LiteralPath $path) { return $path }
-        }
-    }
-    return $null
-}
 
 function Get-Version($Path, $Pattern) {
     $match = Select-String -LiteralPath $Path -Pattern $Pattern | Select-Object -First 1
@@ -32,37 +13,48 @@ function Get-Version($Path, $Pattern) {
     return $match.Matches[0].Groups[1].Value
 }
 
+function Invoke-Checked($Label) {
+    if ($LASTEXITCODE -ne 0) { throw "$Label failed (exit code $LASTEXITCODE)." }
+}
+
 # Check everything up front so a missing tool fails in seconds, not after
 # several minutes of PyInstaller.
 Write-Host "==> Checking build tools"
-$setupVersion = Get-Version "installer.iss" '#define MyAppVersion "([^"]+)"'
-$appVersion = Get-Version (Join-Path (Join-Path "app" "services") "updater.py") '^APP_VERSION = "([^"]+)"'
-if ($setupVersion -ne $appVersion) {
-    throw "Version mismatch: installer.iss is $setupVersion but app/services/updater.py is $appVersion."
-}
+$version = Get-Version (Join-Path (Join-Path "app" "services") "updater.py") '^APP_VERSION = "([^"]+)"'
 
 python -m PyInstaller --version | Out-Null
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller is not installed. Run: python -m pip install pyinstaller"
 }
-
-$iscc = Find-Iscc
-if (-not $iscc) {
-    throw "Inno Setup (ISCC.exe) was not found. Install Inno Setup 6.7+ from https://jrsoftware.org/isdl.php, or set `$env:ISCC to the full path of ISCC.exe."
-}
-Write-Host "    version $setupVersion, Inno Setup: $iscc"
+Write-Host "    version $version"
 
 Write-Host "==> Building server utilities and GUI"
 & (Join-Path $PSScriptRoot "build_all.ps1")
 
-Write-Host "==> Building installer"
-& $iscc "installer.iss"
-if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed (exit code $LASTEXITCODE)." }
+Write-Host "==> Building uninstaller"
+python -m PyInstaller --clean --noconfirm Uninstall.spec
+Invoke-Checked "PyInstaller (Uninstall.spec)"
 
-$setup = Join-Path (Join-Path $PSScriptRoot "installer") "FlowBench-Setup-$setupVersion.exe"
-if (-not (Test-Path -LiteralPath $setup)) { throw "Inno Setup finished but $setup is missing." }
+Write-Host "==> Packing payload"
+python (Join-Path "tools" "make_payload.py")
+Invoke-Checked "tools/make_payload.py"
+
+Write-Host "==> Building installer"
+python -m PyInstaller --clean --noconfirm Setup.spec
+Invoke-Checked "PyInstaller (Setup.spec)"
+
+$name = "FlowBench-Setup-$version.exe"
+$built = Join-Path "dist" $name
+if (-not (Test-Path -LiteralPath $built)) { throw "PyInstaller finished but $built is missing." }
+if ((Get-Item -LiteralPath $built).LastWriteTime -lt $started) { throw "$built was not rebuilt by this run." }
+$outDir = Join-Path $PSScriptRoot "installer"
+New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+$setup = Join-Path $outDir $name
+Copy-Item -LiteralPath $built -Destination $setup -Force
 $item = Get-Item -LiteralPath $setup
-if ($item.LastWriteTime -lt $started) { throw "$setup was not rebuilt by this run." }
 $sizeMb = [math]::Round($item.Length / 1MB, 1)
+$hash = (Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash.ToLower()
 Write-Host ""
 Write-Host "Installer ready: $setup ($sizeMb MB)"
+Write-Host "SHA256: $hash"
+Write-Host "Upload it to the GitHub release as $name - the in-app updater looks for that name."

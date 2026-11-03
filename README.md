@@ -57,8 +57,14 @@ Check the built-in `example_hello.py` / `example_dns.py` plugins in the plugin f
 
 1. Go to the [**Releases**](https://github.com/Carlown/FlowBench/releases/latest) page
 2. Download the latest `FlowBench-Setup-x.x.x.exe`
-3. Run the installer and follow the wizard (desktop shortcut optional)
+3. Run the installer and follow the wizard (desktop shortcut optional). It installs for the
+   current user in `%LOCALAPPDATA%\Programs\FlowBench` without administrator rights, and removes
+   an older Inno Setup install (1.2.6 and earlier) automatically
 4. Launch from the Start menu or desktop
+
+Later updates install from inside the app: **Settings → Check for Updates → Update now** downloads
+the new installer with a progress bar, closes FlowBench, updates it and reopens it. Uninstall from
+Windows **Settings → Apps**; settings and logs in `%APPDATA%\FlowBench` are kept.
 
 ### Run from Source (Developers)
 
@@ -78,16 +84,22 @@ powershell -ExecutionPolicy Bypass -File build_installer.ps1
 # Output: installer/FlowBench-Setup-1.2.7.exe
 ```
 
-Or step by step:
+Only Python and PyInstaller are needed; the installer is FlowBench's own (`flowbench_installer/`),
+so Inno Setup is no longer required. Or step by step:
 
 ```bash
 # 1. Build the server utilities and GUI with all icon/logo resources
 powershell -File build_all.ps1
 
-# 2. Create the installer (requires Inno Setup 6.7 or later)
-ISCC.exe installer.iss
-# Output: installer/FlowBench-Setup-1.2.7.exe
+# 2. Build the uninstaller, pack the payload, build the installer
+python -m PyInstaller --clean --noconfirm Uninstall.spec
+python tools/make_payload.py
+python -m PyInstaller --clean --noconfirm Setup.spec
+# Output: dist/FlowBench-Setup-1.2.7.exe
 ```
+
+To publish, upload `FlowBench-Setup-<version>.exe` to the GitHub release under exactly that
+name: the in-app updater looks for it.
 
 `app.ico` is the fixed icon for executables, shortcuts, the installer and the system tray.
 The splash uses `app_logo.png` for light mode and `app_logo_dark.png` for dark mode,
@@ -101,7 +113,7 @@ according to the saved theme (light by default). Both PNGs are bundled by `FlowB
 - **Networking**: requests / socket / icmplib
 - **Rate limiting**: custom token-bucket algorithm
 - **Storage**: JSON (`%APPDATA%\FlowBench`)
-- **Packaging**: PyInstaller + Inno Setup 7
+- **Packaging**: PyInstaller + FlowBench's own installer (`flowbench_installer/`)
 
 ---
 
@@ -150,8 +162,14 @@ FlowBench v1.1.0 内置完整插件平台，可以自由扩展功能：
 
 1. 进入 [**Releases**](https://github.com/Carlown/FlowBench/releases/latest) 发布页
 2. 下载最新的 `FlowBench-Setup-x.x.x.exe`
-3. 双击运行，按向导完成安装（可勾选桌面快捷方式）
+3. 双击运行，按向导完成安装（可勾选桌面快捷方式）。默认为当前用户安装到
+   `%LOCALAPPDATA%\Programs\FlowBench`，不需要管理员权限；检测到旧版（1.2.6 及以前的
+   Inno Setup 安装）会自动卸载
 4. 安装后从开始菜单或桌面启动
+
+之后的更新在软件内完成：**设置 → 检查更新 → 立即更新**，带进度条下载新版安装包，
+自动关闭 FlowBench、完成更新并重新打开。卸载在 Windows **设置 → 应用** 中进行，
+`%APPDATA%\FlowBench` 里的设置和日志会保留。
 
 ### 从源码运行（开发者）
 
@@ -171,16 +189,21 @@ powershell -ExecutionPolicy Bypass -File build_installer.ps1
 # 产物位于 installer/FlowBench-Setup-1.2.7.exe
 ```
 
-或分步执行：
+只需要 Python 和 PyInstaller。安装程序是 FlowBench 自己的（`flowbench_installer/`），
+不再需要 Inno Setup。也可以分步执行：
 
 ```bash
 # 1. 生成服务器工具与主程序，包含全部图标和启动图资源
 powershell -File build_all.ps1
 
-# 2. 制作安装程序（需安装 Inno Setup 6.7 或更高版本）
-ISCC.exe installer.iss
-# 产物位于 installer/FlowBench-Setup-1.2.7.exe
+# 2. 生成卸载程序、打包安装数据、生成安装程序
+python -m PyInstaller --clean --noconfirm Uninstall.spec
+python tools/make_payload.py
+python -m PyInstaller --clean --noconfirm Setup.spec
+# 产物位于 dist/FlowBench-Setup-1.2.7.exe
 ```
+
+发布时把 `FlowBench-Setup-<版本号>.exe` 原名上传到 GitHub Release，软件内更新按这个文件名查找。
 
 `app.ico` 固定用于 EXE、快捷方式、安装程序和系统托盘，不随主题切换。
 启动画面根据已保存的主题选择 `app_logo.png`（浅色）或 `app_logo_dark.png`（深色），
@@ -194,7 +217,7 @@ ISCC.exe installer.iss
 - **网络**：requests / socket / icmplib
 - **限速**：自研令牌桶算法
 - **存储**：JSON（`%APPDATA%\FlowBench`）
-- **打包**：PyInstaller + Inno Setup 7
+- **打包**：PyInstaller + FlowBench 自带安装程序（`flowbench_installer/`）
 
 ---
 

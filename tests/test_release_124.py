@@ -39,11 +39,13 @@ class Release124Tests(unittest.TestCase):
 
     def test_release_version_is_consistent(self):
         self.assertEqual(APP_VERSION, "1.2.7")
-        installer = (ROOT / "installer.iss").read_text(encoding="utf-8")
+        setup_spec = (ROOT / "Setup.spec").read_text(encoding="utf-8")
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         features = (ROOT / "PRODUCT_FEATURES.txt").read_text(encoding="utf-8")
-        self.assertIn('#define MyAppVersion "1.2.7"', installer)
-        self.assertIn("OutputBaseFilename=FlowBench-Setup-{#MyAppVersion}", installer)
+        # The installer takes its version from payload.json, which
+        # tools/make_payload.py reads from APP_VERSION.
+        self.assertIn('name=f"FlowBench-Setup-{VERSION}"', setup_spec)
+        self.assertFalse((ROOT / "installer.iss").exists())
         self.assertIn("FlowBench-Setup-1.2.7.exe", readme)
         self.assertIn("(v1.2.7)", features.splitlines()[0])
 

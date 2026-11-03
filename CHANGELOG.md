@@ -6,7 +6,10 @@
 
 - Added search to the Server Agents multi-select panel: filter by name, ID, hostname, platform, or online status with space-separated terms; Select All and Clear act on the visible results only.
 - Restyled the server checklist with Windows/Linux icons, hostname details, and online/offline status pills in place of the plain gray list.
-- Added `build_installer.ps1` to build the installer in one step, checking PyInstaller, Inno Setup, and version consistency before the build starts.
+- Replaced Inno Setup with FlowBench's own installer (`flowbench_installer/`): a bilingual Fluent-style wizard that follows the light/dark theme, installs per user to `%LOCALAPPDATA%\Programs\FlowBench` without administrator rights, swaps the new files in only after they are fully extracted (a failed or cancelled install keeps the previous version), registers Start menu/desktop shortcuts with the FlowBench AppUserModelID and an entry in Settings → Apps, and removes an older Inno Setup install automatically.
+- Added in-app updates: **Update now** downloads the release installer with a progress bar (size and, when GitHub provides it, SHA-256 verified; Retry on failure), closes FlowBench, installs in place, and reopens FlowBench. A failed update reopens the existing version.
+- Added `FlowBench-Uninstall.exe`, which keeps settings and logs in `%APPDATA%\FlowBench`.
+- Added `build_installer.ps1` to build the installer in one step; only Python and PyInstaller are needed.
 - Updated the Japanese language pack to 1.0.2 with translations for the search and server-row text.
 
 ### Fixed
@@ -20,7 +23,8 @@
 ### Verified
 
 - Verified scrolling and mouse-wheel input with 60 servers and responsive search with 300.
-- Passed the full automated test suite (75 tests, 1616 subtests).
+- Built the uninstaller with PyInstaller and ran its two-stage uninstall end to end; covered install, upgrade, rollback, cancel, unsafe paths, legacy migration, update mode, and download verification with automated tests.
+- Passed the full automated test suite (109 tests, 1652 subtests).
 
 ## [1.2.6] - 2026-10-24
 

@@ -1,5 +1,18 @@
-"""检查更新：查询 GitHub Releases 最新版本，发现新版时弹窗提示。"""
+"""检查更新：查询 GitHub Releases 最新版本，发现新版时弹窗提示。
+
+安装版（由 FlowBench 自带安装程序安装）可以在软件内下载新版安装包，
+带进度条，下载完成后自动退出并交给安装程序完成更新、重新打开软件。
+"""
+import hashlib
+import os
+import re
+import secrets
+import sys
+import tempfile
 import threading
+import time
+from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 from PySide6.QtCore import QObject, QUrl, Signal
@@ -12,6 +25,159 @@ LATEST_URL = f"https://github.com/{REPO}/releases/latest"
 _API_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
 
 _keep_alive = []  # 防止后台检查器被 GC
+
+SETUP_ASSET_RE = re.compile(r"^FlowBench-Setup-[0-9A-Za-z._-]+\.exe$", re.IGNORECASE)
+INSTALL_MARKER = "FlowBench.install.json"   # written by flowbench_installer
+DOWNLOAD_CHUNK = 256 * 1024
+
+
+class DownloadError(Exception):
+    pass
+
+
+class DownloadCancelled(Exception):
+    pass
+
+
+def pick_setup_asset(release: dict):
+    """Return the installer asset of a GitHub release, or None."""
+    if not isinstance(release, dict):
+        return None
+    version = str(release.get("tag_name", "")).strip().lstrip("vV")
+    candidates = []
+    for asset in release.get("assets") or []:
+        if not isinstance(asset, dict):
+            continue
+        name = str(asset.get("name", ""))
+        url = str(asset.get("browser_download_url", ""))
+        parsed = urlparse(url)
+        if (SETUP_ASSET_RE.match(name) and parsed.scheme == "https"
+                and parsed.hostname == "github.com"):
+            candidates.append(asset)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda a: version not in str(a.get("name", "")))
+    asset = candidates[0]
+    digest = str(asset.get("digest") or "")
+    try:
+        size = max(0, int(asset.get("size") or 0))
+    except (TypeError, ValueError):
+        size = 0
+    return {"name": str(asset["name"]), "url": str(asset["browser_download_url"]),
+            "size": size,
+            "sha256": digest[7:].lower() if digest.lower().startswith("sha256:") else ""}
+
+
+def managed_install_dir():
+    """Install folder when running from FlowBench's own installer, else None."""
+    if sys.platform != "win32" or not getattr(sys, "frozen", False):
+        return None
+    folder = Path(sys.executable).resolve().parent
+    return folder if (folder / INSTALL_MARKER).is_file() else None
+
+
+def can_self_update(info: dict) -> bool:
+    """Download-and-install works for the packaged Windows app with a setup asset."""
+    return bool(info.get("asset")) and sys.platform == "win32" and getattr(sys, "frozen", False)
+
+
+def downloads_dir() -> Path:
+    return Path(tempfile.gettempdir()) / "FlowBench" / "updates"
+
+
+def setup_path_for(tag: str) -> Path:
+    safe = re.sub(r"[^0-9A-Za-z._-]", "", str(tag).lstrip("vV")) or "latest"
+    return downloads_dir() / f"FlowBench-Setup-{safe}.exe"
+
+
+def cleanup_downloads(current: str = APP_VERSION, folder=None) -> None:
+    """Delete downloaded installers for versions that are no longer newer."""
+    folder = Path(folder) if folder else downloads_dir()
+    try:
+        entries = list(folder.iterdir())
+    except OSError:
+        return
+    for entry in entries:
+        match = re.match(r"^FlowBench-Setup-(.+?)\.exe(?:\.[0-9a-f]{8})?(\.part)?$",
+                         entry.name, re.IGNORECASE)
+        if match and (match.group(2) or not is_newer(match.group(1), current)):
+            try:
+                entry.unlink()
+            except OSError:
+                pass
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def verified_download(path: Path, size: int, sha256: str) -> bool:
+    try:
+        if not path.is_file() or (size and path.stat().st_size != size):
+            return False
+        return not sha256 or _sha256(path) == sha256
+    except OSError:
+        return False
+
+
+def download_file(url: str, dest: Path, size: int = 0, sha256: str = "",
+                  progress=None, cancelled=None, session=None) -> Path:
+    """Stream ``url`` to ``dest`` via a .part file, then verify size and hash."""
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    # Unique per attempt: a cancelled download may still be finishing its
+    # last read when the user starts a new one.
+    part = dest.with_name(f"{dest.name}.{secrets.token_hex(4)}.part")
+    http = session or requests
+    try:
+        with http.get(url, stream=True, timeout=(10, 30),
+                      headers={"Accept": "application/octet-stream"}) as resp:
+            resp.raise_for_status()
+            total = size or int(resp.headers.get("Content-Length") or 0)
+            done = 0
+            with open(part, "wb") as out:
+                for block in resp.iter_content(DOWNLOAD_CHUNK):
+                    if cancelled and cancelled():
+                        raise DownloadCancelled()
+                    if not block:
+                        continue
+                    out.write(block)
+                    done += len(block)
+                    if progress:
+                        progress(done, total)
+        if size and done != size:
+            raise DownloadError(f"size mismatch: got {done} bytes, expected {size}")
+        if sha256 and _sha256(part) != sha256.lower():
+            raise DownloadError("SHA-256 mismatch")
+        os.replace(part, dest)
+        return dest
+    except BaseException:
+        try:
+            part.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def setup_command(setup: Path, install_dir, lang: str, theme: str, pid: int = None,
+                  accent: str = ""):
+    """Command line for the downloaded installer.
+
+    A FlowBench-installed copy is updated in place (``--update``); anything
+    else (e.g. an old Inno Setup install) gets the normal setup wizard, which
+    migrates it.
+    """
+    if install_dir is None:
+        return [str(setup)]
+    command = [str(setup), "--update", "--pid", str(os.getpid() if pid is None else pid),
+               "--dir", str(install_dir), "--lang", lang, "--theme", theme]
+    if accent:
+        command += ["--accent", accent]
+    return command
 
 
 def _ver_tuple(v: str):
@@ -43,6 +209,7 @@ class _Checker(QObject):
         threading.Thread(target=self._work, daemon=True).start()
 
     def _work(self):
+        cleanup_downloads()
         try:
             r = requests.get(_API_URL, timeout=8,
                              headers={"Accept": "application/vnd.github+json"})
@@ -51,7 +218,8 @@ class _Checker(QObject):
             tag = str(d.get("tag_name", ""))
             self.done.emit({"ok": True, "tag": tag,
                             "url": d.get("html_url") or LATEST_URL,
-                            "newer": is_newer(tag)})
+                            "newer": is_newer(tag),
+                            "asset": pick_setup_asset(d)})
         except Exception as e:
             self.done.emit({"ok": False, "error": str(e)})
 
@@ -97,7 +265,7 @@ def check_for_updates(parent=None, manual: bool = False, on_finished=None):
                     if not manual and settings.skip_version == d["tag"]:
                         pass
                     else:
-                        _show_update_dialog(parent, d["tag"], d["url"], L)
+                        _show_update_dialog(parent, d["tag"], d["url"], L, d)
                 elif manual:
                     from qfluentwidgets import InfoBar
                     InfoBar.success(L("已是最新版本", "Up to date"),
@@ -118,17 +286,27 @@ def check_for_updates(parent=None, manual: bool = False, on_finished=None):
     c.go()
 
 
-def _show_update_dialog(parent, tag, url, L):
+def _show_update_dialog(parent, tag, url, L, info=None):
     from qfluentwidgets import MessageBoxBase, TitleLabel, BodyLabel, CheckBox
     from app.services.settings import settings
+
+    info = info or {}
+    self_update = can_self_update(info)
 
     # MessageBoxBase：内容加入 viewLayout，随内容自动调整卡片大小
     box = MessageBoxBase(parent)
 
     title = TitleLabel(L(f"发现新版本 {tag}", f"New version {tag} available"), box)
-    msg = BodyLabel(L(f"当前版本 v{APP_VERSION}，GitHub 已发布 {tag}。\n是否前往下载更新？",
-                      f"Current version v{APP_VERSION}; {tag} is now on GitHub.\n"
-                      f"Open the download page?"), box)
+    if self_update:
+        text = L(f"当前版本 v{APP_VERSION}，GitHub 已发布 {tag}。\n"
+                 "点“立即更新”会在软件内下载并自动安装，完成后自动重新打开 FlowBench。",
+                 f"Current version v{APP_VERSION}; {tag} is now on GitHub.\n"
+                 "Update now downloads and installs it, then reopens FlowBench automatically.")
+    else:
+        text = L(f"当前版本 v{APP_VERSION}，GitHub 已发布 {tag}。\n是否前往下载更新？",
+                 f"Current version v{APP_VERSION}; {tag} is now on GitHub.\n"
+                 f"Open the download page?")
+    msg = BodyLabel(text, box)
     msg.setWordWrap(True)
 
     skipCheck = CheckBox(L("跳过此版本（不再提示本次更新）", "Skip this version (don't remind me again)"), box)
@@ -141,11 +319,10 @@ def _show_update_dialog(parent, tag, url, L):
 
     box.widget.setFixedWidth(480)
 
-    box.yesButton.setText(L("去更新", "Update"))
+    box.yesButton.setText(L("立即更新", "Update now") if self_update else L("去更新", "Update"))
     box.cancelButton.setText(L("稍后再说", "Later"))
 
-    if box.exec():
-        QDesktopServices.openUrl(QUrl(url or LATEST_URL))
+    accepted = box.exec()
 
     # 保存用户选择
     if skipCheck.isChecked():
@@ -157,6 +334,173 @@ def _show_update_dialog(parent, tag, url, L):
     if autoCheck.isChecked():
         if settings.set("auto_check_updates", False):
             _sync_settings_view(parent)
+
+    if accepted:
+        if self_update:
+            start_self_update(parent, tag, info["asset"], url)
+        else:
+            QDesktopServices.openUrl(QUrl(url or LATEST_URL))
+
+
+class _Downloader(QObject):
+    progress = Signal(int, int)
+    done = Signal(dict)
+
+    def __init__(self, asset: dict, dest: Path):
+        super().__init__()
+        self.asset = asset
+        self.dest = Path(dest)
+        self._cancel = False
+
+    def go(self):
+        self._cancel = False
+        threading.Thread(target=self._work, daemon=True).start()
+
+    def cancel(self):
+        self._cancel = True
+
+    def _work(self):
+        try:
+            if verified_download(self.dest, self.asset.get("size", 0),
+                                 self.asset.get("sha256", "")):
+                path = self.dest          # already downloaded earlier
+            else:
+                path = download_file(self.asset["url"], self.dest,
+                                     self.asset.get("size", 0),
+                                     self.asset.get("sha256", ""),
+                                     progress=self.progress.emit,
+                                     cancelled=lambda: self._cancel)
+            self.done.emit({"ok": True, "path": str(path)})
+        except DownloadCancelled:
+            self.done.emit({"ok": False, "cancelled": True})
+        except Exception as e:
+            self.done.emit({"ok": False, "error": str(e)})
+
+
+def _format_mb(n: int) -> str:
+    return f"{n / (1024 * 1024):.1f} MB"
+
+
+def _make_download_dialog(parent, tag, asset, L):
+    from qfluentwidgets import CaptionLabel, MessageBoxBase, ProgressBar, SubtitleLabel
+
+    class UpdateDownloadDialog(MessageBoxBase):
+        """下载新版安装包，带进度条；失败可重试，取消即停止下载。"""
+
+        def __init__(self):
+            super().__init__(parent)
+            self.setup_path = None
+            self.titleLabel = SubtitleLabel(L(f"正在下载 FlowBench {tag}", f"Downloading FlowBench {tag}"), self)
+            self.bar = ProgressBar(self)
+            self.bar.setRange(0, 1000)
+            self.bar.setValue(0)
+            self.detail = CaptionLabel(L("正在连接 GitHub…", "Connecting to GitHub…"), self)
+            self.viewLayout.addWidget(self.titleLabel)
+            self.viewLayout.addSpacing(6)
+            self.viewLayout.addWidget(self.bar)
+            self.viewLayout.addWidget(self.detail)
+            self.widget.setFixedWidth(460)
+            self.yesButton.setText(L("重试", "Retry"))
+            self.yesButton.hide()
+            self.cancelButton.setText(L("取消", "Cancel"))
+            self._started = 0.0
+            self.downloader = _Downloader(asset, setup_path_for(tag))
+            self.downloader.progress.connect(self._on_progress)
+            self.downloader.done.connect(self._on_done)
+            self.start()
+
+        def start(self):
+            self.yesButton.hide()
+            self.titleLabel.setText(L(f"正在下载 FlowBench {tag}", f"Downloading FlowBench {tag}"))
+            self.detail.setText(L("正在连接 GitHub…", "Connecting to GitHub…"))
+            self.bar.setValue(0)
+            self._started = time.monotonic()
+            self.downloader.go()
+
+        def validate(self):
+            # “重试”按钮：重新下载，不关闭对话框
+            self.start()
+            return False
+
+        def reject(self):
+            self.downloader.cancel()
+            super().reject()
+
+        def _on_progress(self, done: int, total: int):
+            elapsed = max(0.001, time.monotonic() - self._started)
+            speed = f"{_format_mb(int(done / elapsed))}/s"
+            if total:
+                self.bar.setValue(min(1000, int(done * 1000 / total)))
+                self.detail.setText(f"{_format_mb(done)} / {_format_mb(total)} · {speed}")
+            else:
+                self.detail.setText(f"{_format_mb(done)} · {speed}")
+
+        def _on_done(self, result: dict):
+            if result.get("ok"):
+                self.setup_path = result["path"]
+                self.bar.setValue(1000)
+                self.detail.setText(L("下载完成，正在启动安装程序…", "Downloaded. Starting the installer…"))
+                self.accept()
+            elif not result.get("cancelled"):
+                self.titleLabel.setText(L("下载失败", "Download failed"))
+                self.detail.setText(result.get("error", ""))
+                self.yesButton.show()
+
+    return UpdateDownloadDialog()
+
+
+def start_self_update(parent, tag, asset, url=None):
+    """下载安装包 → 退出软件 → 安装程序更新并重新打开 FlowBench。"""
+    from qfluentwidgets import InfoBar, MessageBox
+    from app.ui.i18n import L, current_lang
+    from app.services.settings import settings
+
+    box = _make_download_dialog(parent, tag, asset, L)
+    if not box.exec() or not box.setup_path:
+        return False
+
+    try:
+        from app.services.stress import engine
+        running = bool(getattr(engine, "running", False))
+    except Exception:
+        running = False
+    if running:
+        ask = MessageBox(L("测试正在进行", "A test is running"),
+                         L("现在更新会停止当前测试。要立即更新吗？\n选“稍后”的话，安装包会保留，下次更新不用重新下载。",
+                           "Updating now stops the running test. Update now?\n"
+                           "If you choose Later, the download is kept for next time."),
+                         parent)
+        ask.yesButton.setText(L("立即更新", "Update now"))
+        ask.cancelButton.setText(L("稍后", "Later"))
+        if not ask.exec():
+            return False
+
+    command = setup_command(Path(box.setup_path), managed_install_dir(),
+                            "zh" if current_lang() == "zh-CN" else "en",
+                            "dark" if settings.theme == "dark" else "light",
+                            accent=str(settings.theme_color or ""))
+    try:
+        from flowbench_installer.winplat import launch_detached
+        launch_detached(command[0], command[1:], Path(box.setup_path).parent)
+    except Exception as e:
+        InfoBar.error(L("无法启动安装程序", "Could not start the installer"), str(e),
+                      parent=parent, duration=6000)
+        if url:
+            QDesktopServices.openUrl(QUrl(url))
+        return False
+    _quit_for_update(parent)
+    return True
+
+
+def _quit_for_update(parent):
+    """退出软件，让安装程序替换文件（托盘最小化设置不影响）。"""
+    from PySide6.QtWidgets import QApplication
+    window = parent.window() if parent is not None and hasattr(parent, "window") else None
+    quit_app = getattr(window, "_quit_app", None)
+    if callable(quit_app):
+        quit_app()
+    else:
+        QApplication.quit()
 
 
 def _sync_settings_view(parent):
