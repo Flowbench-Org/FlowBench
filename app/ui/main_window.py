@@ -222,12 +222,14 @@ class MainWindow(FluentWindow):
 
     def _init_shortcuts(self):
         """注册全局页面快捷键，并保存引用避免被 Qt 回收。"""
+        # Ctrl+1..6 follow the order of the sidebar.
         bindings = (
             ("Ctrl+1", self.go_dashboard),
             ("Ctrl+2", self.go_stress),
             ("Ctrl+3", self.go_collab),
-            ("Ctrl+4", self.go_monitor),
-            ("Ctrl+5", self.go_market),
+            ("Ctrl+4", self.go_agents),
+            ("Ctrl+5", self.go_monitor),
+            ("Ctrl+6", self.go_market),
             ("Ctrl+,", self.go_settings),
         )
         self._page_shortcuts = []
@@ -553,7 +555,28 @@ class MainWindow(FluentWindow):
         if state not in self._control_reveals:
             return
         self._control_reveals.remove(state)
-        widget, effect, _group, _movement, end_pos, _serial = state
+        self._restore_revealed_control(state)
+
+    def _clear_control_reveals(self):
+        states, self._control_reveals = self._control_reveals, []
+        for state in states:
+            self._restore_revealed_control(state)
+
+    @staticmethod
+    def _restore_revealed_control(state):
+        """Put a control back in place and free its one-shot animation.
+
+        The animation group is parented to the window, so it must be deleted
+        explicitly or every page switch leaks a few hundred QObjects. Stop it
+        before removing the effect: the effect is deleted with it and a
+        running animation would be left without a target.
+        """
+        widget, effect, group, _movement, end_pos, _serial = state
+        try:
+            group.stop()
+            group.deleteLater()
+        except RuntimeError:
+            pass
         try:
             if end_pos is not None:
                 widget.move(end_pos)
@@ -562,19 +585,6 @@ class MainWindow(FluentWindow):
                 widget.setGraphicsEffect(None)
         except RuntimeError:
             pass
-
-    def _clear_control_reveals(self):
-        states, self._control_reveals = self._control_reveals, []
-        for widget, effect, group, _movement, end_pos, _serial in states:
-            group.stop()
-            try:
-                if end_pos is not None:
-                    widget.move(end_pos)
-                effect.setOpacity(1.0)
-                if widget.graphicsEffect() is effect:
-                    widget.setGraphicsEffect(None)
-            except RuntimeError:
-                pass
 
     def _animate_navigation_reveal(self, route_key: str):
         """Keep navigation items stable while Fluent expands/collapses the rail.
@@ -608,21 +618,23 @@ class MainWindow(FluentWindow):
         if getattr(self, state_name, None) is not state:
             return
         setattr(self, state_name, None)
-        widget, effect, _animation = state
-        try:
-            effect.setOpacity(1.0)
-            if widget.graphicsEffect() is effect:
-                widget.setGraphicsEffect(None)
-        except RuntimeError:
-            pass
+        self._restore_revealed_widget(state)
 
     def _clear_reveal(self, state_name: str):
         state = getattr(self, state_name, None)
         if state is None:
             return
         setattr(self, state_name, None)
+        self._restore_revealed_widget(state)
+
+    @staticmethod
+    def _restore_revealed_widget(state):
         widget, effect, animation = state
-        animation.stop()
+        try:
+            animation.stop()
+            animation.deleteLater()
+        except RuntimeError:
+            pass
         try:
             effect.setOpacity(1.0)
             if widget.graphicsEffect() is effect:
@@ -638,6 +650,9 @@ class MainWindow(FluentWindow):
 
     def go_collab(self):
         self._go_to(self.collab)
+
+    def go_agents(self):
+        self._go_to(self.agentView)
 
     def go_monitor(self):
         self._go_to(self.monitor)

@@ -88,11 +88,16 @@ def is_authorized(host: str) -> bool:
     return any(a.get("host") == host for a in settings.authorized)
 
 
-def add_authorized(host: str, note: str = ""):
+def add_authorized(host: str, note: str = "") -> bool:
+    """Record a confirmed target; True when it is (now) authorized.
+
+    Callers treat a falsy result as "could not save", so an already
+    authorized host must report True rather than None.
+    """
     if not host:
-        return
+        return False
     if is_authorized(host):
-        return
+        return True
     items = list(settings.authorized)
     items.append({"id": uuid.uuid4().hex[:8], "host": host,
                   "note": note, "ts": time.time()})

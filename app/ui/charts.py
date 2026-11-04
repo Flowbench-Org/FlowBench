@@ -39,8 +39,13 @@ class HoverChart(QChartView):
         self._chart.setBackgroundVisible(False)
         self._chart.setPlotAreaBackgroundVisible(False)
         self._chart.setMargins(QMargins(0, 0, 0, 0))  # 紧凑边距
+        # QChart 默认在图例和绘图区外再留约 9px 的布局边距；在卡片里这部分
+        # 只会把绘图区压扁（主页 860px 高时纵轴只剩 2~3 个刻度）。
+        self._chart.layout().setContentsMargins(0, 0, 0, 0)
+        self._chart.setBackgroundRoundness(0)
+        self.setFrameShape(QChartView.Shape.NoFrame)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.setMinimumHeight(150)
+        self.setMinimumHeight(170)
         self._dbl_timer = QElapsedTimer()  # 双击复位时间标记
 
         # 坐标轴

@@ -1,5 +1,26 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Ctrl+1…Ctrl+6 now follow the sidebar order: Ctrl+4 opens Server Agents (previously unbound), Ctrl+5 Monitor and Ctrl+6 Plugins.
+- Server Agents: the control URL and token each take a full row under one label column, so a URL is readable at the minimum window width.
+- The trend charts on Home and Monitor use the full card height; the Home chart no longer drops axis labels at 1360×860.
+- The plugin search box's suggestions button is a drop-down chevron (pointing up while open) instead of the arrow that the sort button next to it also uses.
+- "Last error: —" is shown in gray while there is no error, and in red only for a real failure.
+- Report target labels read `http://127.0.0.1` instead of `HTTP://127.0.0.1`, and the summed rate cap reads `150 QPS` instead of `150.0 QPS`.
+
+### Fixed
+
+- Switching pages with page animations on leaked several hundred animation objects per switch; they are now freed, and the Qt "animation without target" warnings are gone.
+- When a stress test ends, the live card now shows the final totals from the report and resets Live QPS and Active Threads to 0; it used to keep the last half-second snapshot (for example 306 sent while the report said 322, and 12 active threads after the end).
+- The report duration no longer includes the time spent waiting for in-flight requests after the test window: a 1-second TCP test against a silent server reported 2.9 seconds.
+- On the Stress Test page the Protocol and duration-unit boxes have the same height as the number boxes beside them, so their labels line up.
+- The number boxes under Settings → Defaults have one width and line up on the right.
+- Clicking **Check for Updates** again within 10 seconds no longer re-enables the button while the second check is still running.
+- `add_authorized()` returns `True` for a target that is already authorized and `False` for an empty one, instead of `None`, which callers reported as a save failure.
+
 ## [1.2.8] - 2026-11-03
 
 ### Added

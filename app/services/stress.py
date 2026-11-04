@@ -381,6 +381,7 @@ class StressEngine(QObject):
     def _supervise(self):
         poll_interval = 0.1  # 更频繁的检测间隔，UI更流畅、停止响应更快
         stop_deadline = None
+        stopped_at = None
         while True:
             alive = any(t.is_alive() for t in self._threads)
             left = self._end - time.monotonic()
@@ -388,6 +389,9 @@ class StressEngine(QObject):
             if should_stop and stop_deadline is None:
                 # 刚进入停止阶段：设置总等待截止时间（1.5秒后放弃等待）
                 stop_deadline = time.monotonic() + 1.5
+                # The test window ends here (or at the planned end); the
+                # time spent waiting for in-flight requests is not test time.
+                stopped_at = min(time.monotonic(), self._end)
             if should_stop:
                 if not alive or (stop_deadline and time.monotonic() > stop_deadline):
                     break
@@ -424,7 +428,7 @@ class StressEngine(QObject):
             report = {
                 "target": self.config["target"],
                 "protocol": self.config["protocol"],
-                "duration": time.monotonic() - self._t0,
+                "duration": max(0.0, (stopped_at or time.monotonic()) - self._t0),
                 "total": self.total,
                 "success": self.success,
                 "fail": self.fail,

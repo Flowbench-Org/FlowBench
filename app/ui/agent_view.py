@@ -574,25 +574,29 @@ class AgentView(ScrollArea):
         title_row.addWidget(self.generateBtn)
         form.addLayout(title_row)
 
-        connection = QVBoxLayout()
-        connection.setSpacing(8)
-        connection_fields = QHBoxLayout()
-        connection_fields.addWidget(BodyLabel(L("控制地址", "Control URL"), control))
+        # One label column for all three rows: the address and token each get
+        # the full width (side by side, a URL only had ~140 px at 1080 px).
+        fields = QGridLayout()
+        fields.setHorizontalSpacing(10)
+        fields.setVerticalSpacing(8)
+        fields.setColumnStretch(1, 1)
+        fields.addWidget(BodyLabel(L("控制地址", "Control URL"), control), 0, 0)
         self.hubEdit = LineEdit(control)
         self.hubEdit.setPlaceholderText("https://control.example.com  /  mqtt://broker…")
-        connection_fields.addWidget(self.hubEdit, 1)
-        connection_fields.addWidget(BodyLabel(L("控制令牌", "Controller token"), control))
+        fields.addWidget(self.hubEdit, 0, 1, 1, 2)
+        fields.addWidget(BodyLabel(L("控制令牌", "Controller token"), control), 1, 0)
         self.tokenEdit = PasswordLineEdit(control)
-        connection_fields.addWidget(self.tokenEdit, 1)
-        connection.addLayout(connection_fields)
-        form.addLayout(connection)
+        fields.addWidget(self.tokenEdit, 1, 1, 1, 2)
+        form.addLayout(fields)
 
         selection = QHBoxLayout()
-        selection.addWidget(BodyLabel(L("服务器节点", "Server agent"), control))
+        selection.setSpacing(8)
+        fields.addWidget(BodyLabel(L("服务器节点", "Server agent"), control), 2, 0)
         self.agentCombo = ComboBox(control)
         self.agentCombo.setPlaceholderText(L("先刷新在线节点", "Refresh to load agents"))
+        self.agentCombo.setFixedHeight(self.hubEdit.height())
         self.agentCombo.currentIndexChanged.connect(self._on_combo_selection_changed)
-        selection.addWidget(self.agentCombo, 1)
+        fields.addWidget(self.agentCombo, 2, 1)
         self.selectAgentsBtn = PushButton(L("多选服务器…", "Select servers…"), control)
         self.selectAgentsBtn.setToolTip(L(
             "打开面板搜索并选择一个或多个服务器执行同一个任务。",
@@ -601,7 +605,7 @@ class AgentView(ScrollArea):
         selection.addWidget(self.selectAgentsBtn)
         self.nodeStatus = CaptionLabel(L("未连接", "Not connected"), control)
         selection.addWidget(self.nodeStatus)
-        form.addLayout(selection)
+        fields.addLayout(selection, 2, 2)
 
         # Node status card, migrated from the Collaborative page.
         status_card = SimpleCardWidget(self.view)

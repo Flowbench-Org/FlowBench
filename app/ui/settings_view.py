@@ -258,6 +258,13 @@ class SettingsView(ScrollArea):
                                 L("TCP、UDP 与插件协议的发送载荷大小",
                                   "Payload size for TCP, UDP and plugin protocols"),
                                 self.packetSizeSpin, defaults))
+        # Same width for every number box so the right-hand column lines up
+        # (each SpinBox otherwise sizes itself to its own range).
+        default_spins = (self.threadSpin, self.timeoutSpin, self.rateSpin,
+                         self.durationSpin, self.packetSizeSpin)
+        spin_width = max(spin.sizeHint().width() for spin in default_spins)
+        for spin in default_spins:
+            spin.setFixedWidth(spin_width)
         root.addWidget(defaults)
 
         # 设置备份与恢复（仅处理安全偏好，不导出授权目标、Token 或插件私有数据）
@@ -360,8 +367,14 @@ class SettingsView(ScrollArea):
         self.updateBtn.setEnabled(False)
         self.updateBtn.setText(L("检查中…", "Checking…"))
         from app.services.updater import check_for_updates as run_check
+        # The 10 s fallback of an earlier check must not re-enable the button
+        # while a later check is still running.
+        self._update_check_serial = getattr(self, "_update_check_serial", 0) + 1
+        serial = self._update_check_serial
 
         def _done():
+            if serial != self._update_check_serial:
+                return
             self.updateBtn.setEnabled(True)
             self.updateBtn.setText(L("检查更新", "Check for Updates"))
 

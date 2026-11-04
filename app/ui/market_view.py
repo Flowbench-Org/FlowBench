@@ -17,14 +17,14 @@ import unicodedata
 
 import requests
 from PySide6.QtCore import (QEvent, QEasingCurve, QPoint, QPropertyAnimation,
-                            QRect, Qt, QTimer, QUrl, Signal)
+                            QRect, QRectF, Qt, QTimer, QUrl, Signal)
 from PySide6.QtGui import (QColor, QDesktopServices, QIcon, QKeySequence,
                            QPainter, QPainterPath, QPixmap, QShortcut)
 from PySide6.QtWidgets import (QApplication, QFileDialog, QGridLayout,
                                QHBoxLayout, QLabel, QLayout, QStackedWidget,
                                QVBoxLayout, QWidget)
 from qfluentwidgets import (Action, BodyLabel, CaptionLabel, ComboBox,
-                            FluentIcon as FIF, IconWidget,
+                            FluentIcon as FIF, FluentIconBase, IconWidget,
                             IndeterminateProgressRing, InfoBar, isDarkTheme,
                             LineEditButton, MessageBox, MessageBoxBase, Pivot,
                             CheckableMenu, PrimaryPushButton, PushButton,
@@ -39,6 +39,36 @@ from app.services.market import (INDEX_EDIT_URL, MarketClient,
 from app.services.plugins import _i18n_text, plugin_manager, plugins_dir
 from app.services.settings import settings
 from app.ui.i18n import L
+
+class _ChevronIcon(FluentIconBase):
+    """Drop-down chevron that can point up while its panel is open.
+
+    FluentIcon only ships a downward chevron (ARROW_DOWN, the one ComboBox
+    uses); the upward one is the same glyph rotated half a turn.
+    """
+
+    def __init__(self, up: bool = False):
+        self.up = up
+
+    def path(self, theme=None):
+        return FIF.ARROW_DOWN.path() if theme is None else FIF.ARROW_DOWN.path(theme)
+
+    def render(self, painter, rect, theme=None, indexes=None, **attributes):
+        kwargs = {} if theme is None else {"theme": theme}
+        if not self.up:
+            FIF.ARROW_DOWN.render(painter, rect, indexes=indexes, **kwargs, **attributes)
+            return
+        rect = QRectF(rect)
+        painter.save()
+        painter.translate(rect.center())
+        painter.rotate(180)
+        painter.translate(-rect.center())
+        FIF.ARROW_DOWN.render(painter, rect, indexes=indexes, **kwargs, **attributes)
+        painter.restore()
+
+
+_CHEVRON_DOWN = _ChevronIcon(False)
+_CHEVRON_UP = _ChevronIcon(True)
 
 _ICON_SIZE = 40
 _MAX_ICON_BYTES = 64 * 1024
@@ -827,7 +857,9 @@ class PluginMarketPage(QWidget):
         self.searchEdit.setAccessibleName(L("搜索插件", "Search plugins"))
         self.searchEdit.setClearButtonEnabled(True)
         # 搜索框内下拉箭头：放在放大镜按钮正左侧。
-        self.searchDropDownBtn = LineEditButton(FIF.DOWN, self.searchEdit)
+        # Chevron, like every other drop-down; FIF.DOWN is the arrow used by
+        # the sort-direction button next to it and read as "sort".
+        self.searchDropDownBtn = LineEditButton(_CHEVRON_DOWN, self.searchEdit)
         self.searchDropDownBtn.setFixedSize(29, 25)
         search_btn_index = self.searchEdit.hBoxLayout.indexOf(
             self.searchEdit.searchButton)
@@ -1174,7 +1206,7 @@ class PluginMarketPage(QWidget):
         """处理下拉生命周期、外部点击、键盘和窗口位置变化。"""
         if watched is self.searchSuggestPanel and event.type() == QEvent.Hide:
             self._suggestions_open = False
-            self.searchDropDownBtn.setIcon(FIF.DOWN)
+            self.searchDropDownBtn.setIcon(_CHEVRON_DOWN)
             self.searchDropDownBtn.setToolTip(
                 L("展开搜索推荐", "Show search suggestions"))
             self.searchDropDownBtn.setAccessibleName(
@@ -1305,7 +1337,7 @@ class PluginMarketPage(QWidget):
         if self._suggestions_open and self.searchSuggestPanel.isVisible():
             return
         self._suggestions_open = True
-        self.searchDropDownBtn.setIcon(FIF.UP)
+        self.searchDropDownBtn.setIcon(_CHEVRON_UP)
         self.searchDropDownBtn.setToolTip(
             L("收起搜索推荐", "Hide search suggestions"))
         self.searchDropDownBtn.setAccessibleName(
@@ -1342,12 +1374,12 @@ class PluginMarketPage(QWidget):
             self._commit_pending_search()
         if not self.searchSuggestPanel.isVisible():
             self._suggestions_open = False
-            self.searchDropDownBtn.setIcon(FIF.DOWN)
+            self.searchDropDownBtn.setIcon(_CHEVRON_DOWN)
             self.searchDropDownBtn.setAccessibleName(
                 L("展开搜索推荐", "Show search suggestions"))
             return
         self._suggestions_open = False
-        self.searchDropDownBtn.setIcon(FIF.DOWN)
+        self.searchDropDownBtn.setIcon(_CHEVRON_DOWN)
         self.searchDropDownBtn.setToolTip(
             L("展开搜索推荐", "Show search suggestions"))
         self.searchDropDownBtn.setAccessibleName(
@@ -1383,7 +1415,7 @@ class PluginMarketPage(QWidget):
             animation.stop()
         self._suggestions_open = False
         self.searchSuggestPanel.hide()
-        self.searchDropDownBtn.setIcon(FIF.DOWN)
+        self.searchDropDownBtn.setIcon(_CHEVRON_DOWN)
         self.searchDropDownBtn.setToolTip(
             L("展开搜索推荐", "Show search suggestions"))
         self.searchDropDownBtn.setAccessibleName(

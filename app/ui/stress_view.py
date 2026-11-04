@@ -64,6 +64,20 @@ def fmt_bytes(n: float) -> str:
     return f"{n:.2f} PB"
 
 
+def _fmt_rate(value) -> str:
+    """150.0 -> "150", 2.5 -> "2.5" (summed per-target caps are floats)."""
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    return str(int(value)) if value.is_integer() else f"{value:.1f}"
+
+
+def _target_label(protocol: str, target: str) -> str:
+    """"http://127.0.0.1" rather than "HTTP://127.0.0.1" in the report."""
+    return f"{str(protocol).lower()}://{target}"
+
+
 def _subtle_text_color() -> str:
     """次要文字颜色，根据主题返回。"""
     if isDarkTheme():
@@ -425,6 +439,9 @@ class StressView(ScrollArea):
         self.protoCombo = ComboBox(card)
         self.protoCombo.addItems(["HTTP", "HTTPS", "TCP", "UDP", "ICMP"])
         self.protoCombo.currentTextChanged.connect(self._on_proto_changed)
+        # Fluent SpinBox is fixed at 33 px but ComboBox is ~32 px, so the
+        # protocol label and box sat a few pixels lower than the port ones.
+        self.protoCombo.setFixedHeight(self.portSpin.height())
         prow.addWidget(self._wrap(BodyLabel(L("端口", "Port"), card), self.portSpin))
         prow.addWidget(self._wrap(BodyLabel(L("协议", "Protocol"), card), self.protoCombo))
         lay.addLayout(prow)
@@ -469,6 +486,7 @@ class StressView(ScrollArea):
         self.durUnitCombo = ComboBox(dur_wrap)
         self.durUnitCombo.addItems([L("秒", "sec"), L("分钟", "min"), L("小时", "hour"), L("天", "day")])
         self.durUnitCombo.currentIndexChanged.connect(self._on_dur_unit_changed)
+        self.durUnitCombo.setFixedHeight(self.durSpin.height())
         dur_row.addWidget(self.durSpin, 1)
         dur_row.addWidget(self.durUnitCombo)
         dv.addLayout(dur_row)
@@ -518,6 +536,23 @@ class StressView(ScrollArea):
         lay.addLayout(io_row)
         return card
 
+    def _set_last_error(self, text: str):
+        """Show the latest failure; only an actual error is drawn in red."""
+        if text:
+            self.errLabel.setText(L(f"最近失败原因：{text}", f"Last error: {text}"))
+        else:
+            self.errLabel.setText(L("最近失败原因：—", "Last error: —"))
+        if bool(text) != self._has_last_error or not self.errLabel.property("errStyled"):
+            self._has_last_error = bool(text)
+            self._apply_last_error_style()
+
+    def _apply_last_error_style(self):
+        from qfluentwidgets import setCustomStyleSheet
+        color = "#D13438" if self._has_last_error else _subtle_text_color()
+        setCustomStyleSheet(self.errLabel, f"FluentLabelBase{{color:{color};}}",
+                            f"FluentLabelBase{{color:{color};}}")
+        self.errLabel.setProperty("errStyled", True)
+
     def _wrap(self, label, widget):
         w = QWidget(self.view)
         v = QVBoxLayout(w)
@@ -563,17 +598,15 @@ class StressView(ScrollArea):
         lay.addLayout(grid)
 
         # 最近失败原因（实时）
-        self.errLabel = CaptionLabel(L("最近失败原因：—", "Last error: —"), card)
-        from qfluentwidgets import setCustomStyleSheet
-        setCustomStyleSheet(
-            self.errLabel,
-            "FluentLabelBase{color:#D13438;}",
-            "FluentLabelBase{color:#D13438;}")
+        self.errLabel = CaptionLabel(card)
         self.errLabel.setWordWrap(True)
+        self._has_last_error = False
+        self._set_last_error("")
         lay.addWidget(self.errLabel)
 
         # 分目标实时状态（多目标时显示每个目标的成功/失败）
         self.targetsLabel = CaptionLabel("", card)
+        from qfluentwidgets import setCustomStyleSheet
         setCustomStyleSheet(
             self.targetsLabel,
             "FluentLabelBase{color:#0078D4;}",
@@ -921,7 +954,7 @@ class StressView(ScrollArea):
         self.mAvg.setText("0.0")
         self.mActive.setText("0")
         self.mTx.setText("0 B")
-        self.errLabel.setText(L("最近失败原因：—", "Last error: —"))
+        self._set_last_error("")
         self.targetsLabel.setText("")
 
         # 立即显示等待遮罩，给用户明确的"正在启动"反馈
@@ -1022,10 +1055,7 @@ class StressView(ScrollArea):
         """刷新中性色与语义色，避免 qfluent 重载样式后覆盖自定义颜色。"""
         self.mActive.set_color(_subtle_text_color())
         from qfluentwidgets import setCustomStyleSheet
-        setCustomStyleSheet(
-            self.errLabel,
-            "FluentLabelBase{color:#D13438;}",
-            "FluentLabelBase{color:#D13438;}")
+        self._apply_last_error_style()
         setCustomStyleSheet(
             self.targetsLabel,
             "FluentLabelBase{color:#0078D4;}",
@@ -1045,11 +1075,7 @@ class StressView(ScrollArea):
         self.mActive.setText(str(active))
         self.progressBar.setValue(int(d["progress"] * 100))
         last_err = d.get("last_error") or ""
-        if last_err:
-            self.errLabel.setText(L(f"最近失败原因：{err_text(last_err)}",
-                                    f"Last error: {err_text(last_err)}"))
-        else:
-            self.errLabel.setText(L("最近失败原因：—", "Last error: —"))
+        self._set_last_error(err_text(last_err) if last_err else "")
         # 分目标实时状态
         parts = [f"{t['host']}: ✓{t['success']} ✗{t['fail']} ({t['qps']:.0f} QPS)"
                  for t in d.get("targets", [])]
@@ -1071,6 +1097,20 @@ class StressView(ScrollArea):
         self.stopBtn.setEnabled(False)
         self.statusLabel.setText(L("已完成", "Completed"))
         self.progressBar.setValue(100)
+        # The live card only sees the last 500 ms snapshot: without this the
+        # totals stayed a few hundred requests short of the report and the
+        # card kept showing "12 active threads" / the last QPS after the end.
+        self.mTotal.setText(str(r["total"]))
+        self.mSuccess.setText(str(r["success"]))
+        self.mFail.setText(str(r["fail"]))
+        self.mTx.setText(fmt_bytes(r.get("bytes_tx", 0)))
+        self.mAvg.setText(f"{r['avg']:.1f}")
+        self.mQps.setText("0.0")
+        self.mActive.setText("0")
+        final_targets = r.get("targets") or []
+        if final_targets:
+            self.targetsLabel.setText("  |  ".join(
+                f"{t['target']}: ✓{t['success']} ✗{t['fail']}" for t in final_targets))
         err_rate = (r["fail"] / r["total"] * 100) if r["total"] else 0.0
         dur = r["duration"]
         dur_text = (f"{dur:.1f} " + L("秒", "s")) if dur < 60 else (f"{dur / 60:.1f} " + L("分钟", "min"))
@@ -1082,24 +1122,24 @@ class StressView(ScrollArea):
                      f"{len(targets)} targets  |  Duration {dur_text}\n")
             for t in targets:
                 ter = (t["fail"] / t["total"] * 100) if t["total"] else 0.0
-                text += L(f"• {t['protocol']}://{t['target']}  共 {t['total']} 成功 {t['success']} "
+                text += L(f"• {_target_label(t['protocol'], t['target'])}  共 {t['total']} 成功 {t['success']} "
                           f"失败 {t['fail']}（{ter:.1f}%）平均 {t['avg']:.1f} ms  {fmt_bytes(t.get('bytes_tx', 0))}\n",
-                          f"• {t['protocol']}://{t['target']}  total {t['total']} ok {t['success']} "
+                          f"• {_target_label(t['protocol'], t['target'])}  total {t['total']} ok {t['success']} "
                           f"fail {t['fail']} ({ter:.1f}%) avg {t['avg']:.1f} ms  {fmt_bytes(t.get('bytes_tx', 0))}\n")
             text += L(f"合计 {r['total']}  成功 {r['success']}  失败 {r['fail']}（错误率 {err_rate:.2f}%）\n",
                       f"Total {r['total']}  success {r['success']}  failed {r['fail']} (error rate {err_rate:.2f}%)\n")
         else:
             text = (
-                L(f"目标 {r['protocol']}://{r['target']}  |  持续 {dur_text}\n",
-                  f"Target {r['protocol']}://{r['target']}  |  Duration {dur_text}\n")
+                L(f"目标 {_target_label(r['protocol'], r['target'])}  |  持续 {dur_text}\n",
+                  f"Target {_target_label(r['protocol'], r['target'])}  |  Duration {dur_text}\n")
                 + L(f"总请求 {r['total']}  成功 {r['success']}  失败 {r['fail']}（错误率 {err_rate:.2f}%）\n",
                     f"Total {r['total']}  Success {r['success']}  Failed {r['fail']} (error rate {err_rate:.2f}%)\n")
             )
         text += (
             L(f"平均延迟 {r['avg']:.1f} ms   P50 {r['p50']:.1f} ms   P90 {r['p90']:.1f} ms   P99 {r['p99']:.1f} ms\n",
               f"Avg latency {r['avg']:.1f} ms   P50 {r['p50']:.1f} ms   P90 {r['p90']:.1f} ms   P99 {r['p99']:.1f} ms\n")
-            + L(f"总发送流量 {fmt_bytes(r.get('bytes_tx', 0))}   速率上限 {r['rate_limit']} QPS",
-                f"Total sent {fmt_bytes(r.get('bytes_tx', 0))}   Rate cap {r['rate_limit']} QPS")
+            + L(f"总发送流量 {fmt_bytes(r.get('bytes_tx', 0))}   速率上限 {_fmt_rate(r['rate_limit'])} QPS",
+                f"Total sent {fmt_bytes(r.get('bytes_tx', 0))}   Rate cap {_fmt_rate(r['rate_limit'])} QPS")
         )
         errors = r.get("errors") or {}
         if errors:
