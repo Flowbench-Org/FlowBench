@@ -38,7 +38,7 @@ class Release124Tests(unittest.TestCase):
         settings._data.update(self._settings)
 
     def test_release_version_is_consistent(self):
-        self.assertEqual(APP_VERSION, "1.2.8")
+        self.assertEqual(APP_VERSION, "1.2.9")
         setup_spec = (ROOT / "Setup.spec").read_text(encoding="utf-8")
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         features = (ROOT / "PRODUCT_FEATURES.txt").read_text(encoding="utf-8")
@@ -46,8 +46,8 @@ class Release124Tests(unittest.TestCase):
         # tools/make_payload.py reads from APP_VERSION.
         self.assertIn('name=f"FlowBench-Setup-{VERSION}"', setup_spec)
         self.assertFalse((ROOT / "installer.iss").exists())
-        self.assertIn("FlowBench-Setup-1.2.8.exe", readme)
-        self.assertIn("(v1.2.8)", features.splitlines()[0])
+        self.assertIn("FlowBench-Setup-1.2.9.exe", readme)
+        self.assertIn("(v1.2.9)", features.splitlines()[0])
 
     def test_all_translation_calls_have_chinese_and_english_text(self):
         failures = []

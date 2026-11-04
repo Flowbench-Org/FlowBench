@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.9] - 2026-11-04
 
 ### Changed
 
@@ -21,6 +21,12 @@
 - The number boxes under Settings → Defaults have one width and line up on the right.
 - Clicking **Check for Updates** again within 10 seconds no longer re-enables the button while the second check is still running.
 - `add_authorized()` returns `True` for a target that is already authorized and `False` for an empty one, instead of `None`, which callers reported as a save failure.
+
+### Verified
+
+- Ran a live three-target HTTP stress test against a local server (success, refused, HTTP 500) and checked that the live card, per-target line and report agree.
+- Checked every page in Chinese and English, light and dark, at 1360×860 and at the 1080×700 minimum size.
+- Passed the full automated test suite (124 tests, 1659 subtests).
 
 ## [1.2.8] - 2026-11-03
 
