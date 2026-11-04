@@ -57,54 +57,22 @@ class StepWorker(QThread):
             self.succeeded.emit(result)
 
 
-class SetupWindow(QWidget):
-    """Interactive wizard (``update=False``) or silent-ish updater window."""
+class InstallerWindow(QWidget):
+    """Look shared by the setup and uninstall windows: background, logo
+    header, title bar colour, button rows and message boxes."""
 
-    finished = Signal(bool)
-
-    def __init__(self, payload: Path, info: dict, *, update: bool = False,
-                 target: Optional[Path] = None, wait_pid: int = 0,
-                 chinese: Optional[bool] = None, resources: Optional[Path] = None,
-                 platform=winplat, wait_timeout: float = 60.0, parent=None):
+    def __init__(self, *, chinese: Optional[bool] = None,
+                 resources: Optional[Path] = None, platform=winplat, parent=None):
         super().__init__(parent)
-        self.payload = Path(payload)
-        self.info = info
-        self.update_mode = update
         self.platform = platform
-        self.wait_pid = int(wait_pid or 0)
-        self.wait_timeout = wait_timeout
         self.chinese = platform.system_prefers_chinese() if chinese is None else chinese
         self.resources = Path(resources) if resources else None
-        self.session: Optional[SetupSession] = None
-        self.worker: Optional[StepWorker] = None
-        self.busy = False
-        self.succeeded = False
-        self._close_after_cancel = False
-
-        registered = platform.registered_install_dir()
-        self.target = Path(target or registered or platform.default_install_dir())
-
         self.setObjectName("SetupWindow")
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setWindowTitle(self.t(f"FlowBench {self.version} 安装", f"FlowBench {self.version} Setup"))
         icon = self._resource("app.ico")
         if icon:
             self.setWindowIcon(QIcon(str(icon)))
         self._apply_background()
-
-        if update:
-            self._build_update_ui()
-            self.setFixedSize(460, 200)
-            QTimer.singleShot(0, self.start_update)
-        else:
-            self._build_wizard_ui()
-            self.setFixedSize(600, 430)
-
-    # -- helpers ------------------------------------------------------------
-
-    @property
-    def version(self) -> str:
-        return self.info.get("version", "")
 
     def t(self, zh: str, en: str) -> str:
         return zh if self.chinese else en
@@ -149,9 +117,14 @@ class SetupWindow(QWidget):
         box.cancelButton.setText(self.t("取消", "Cancel"))
         return bool(box.exec())
 
-    # -- wizard UI ------------------------------------------------------------
+    def _warn(self, title, text):
+        box = MessageBox(title, text, self)
+        box.cancelButton.hide()
+        box.yesButton.setText(self.t("确定", "OK"))
+        box.exec()
 
-    def _build_wizard_ui(self):
+    def _build_frame(self, title: str, subtitle: str) -> QStackedWidget:
+        """Logo + title header above a page stack; returns the stack."""
         root = QVBoxLayout(self)
         root.setContentsMargins(32, 28, 32, 24)
         root.setSpacing(0)
@@ -161,9 +134,8 @@ class SetupWindow(QWidget):
         header.addWidget(self._logo(56), 0, Qt.AlignTop)
         head_text = QVBoxLayout()
         head_text.setSpacing(2)
-        self.titleLabel = TitleLabel(f"FlowBench {self.version}", self)
-        self.subtitleLabel = CaptionLabel(
-            self.t("网络压力测试工具 · 安装向导", "Network stress testing tool · Setup"), self)
+        self.titleLabel = TitleLabel(title, self)
+        self.subtitleLabel = CaptionLabel(subtitle, self)
         head_text.addWidget(self.titleLabel)
         head_text.addWidget(self.subtitleLabel)
         header.addLayout(head_text, 1)
@@ -173,12 +145,7 @@ class SetupWindow(QWidget):
         self.pages = QStackedWidget(self)
         self.pages.setAttribute(Qt.WA_TranslucentBackground, True)
         root.addWidget(self.pages, 1)
-        self.welcomePage = self._build_welcome_page()
-        self.progressPage = self._build_progress_page()
-        self.donePage = self._build_done_page()
-        for page in (self.welcomePage, self.progressPage, self.donePage):
-            self.pages.addWidget(page)
-        self._refresh_welcome()
+        return self.pages
 
     def _page(self):
         page = QWidget(self.pages)
@@ -196,6 +163,63 @@ class SetupWindow(QWidget):
             row.addWidget(button)
         layout.addStretch(1)
         layout.addLayout(row)
+
+    def _set_elided(self, label, text: str):
+        metrics = label.fontMetrics()
+        label.setText(metrics.elidedText(text, Qt.ElideMiddle, max(200, label.width())))
+
+
+class SetupWindow(InstallerWindow):
+    """Interactive wizard (``update=False``) or silent-ish updater window."""
+
+    finished = Signal(bool)
+
+    def __init__(self, payload: Path, info: dict, *, update: bool = False,
+                 target: Optional[Path] = None, wait_pid: int = 0,
+                 chinese: Optional[bool] = None, resources: Optional[Path] = None,
+                 platform=winplat, wait_timeout: float = 60.0, parent=None):
+        super().__init__(chinese=chinese, resources=resources, platform=platform,
+                         parent=parent)
+        self.payload = Path(payload)
+        self.info = info
+        self.update_mode = update
+        self.wait_pid = int(wait_pid or 0)
+        self.wait_timeout = wait_timeout
+        self.session: Optional[SetupSession] = None
+        self.worker: Optional[StepWorker] = None
+        self.busy = False
+        self.succeeded = False
+        self._close_after_cancel = False
+
+        registered = platform.registered_install_dir()
+        self.target = Path(target or registered or platform.default_install_dir())
+        self.setWindowTitle(self.t(f"FlowBench {self.version} 安装", f"FlowBench {self.version} Setup"))
+
+        if update:
+            self._build_update_ui()
+            self.setFixedSize(460, 200)
+            QTimer.singleShot(0, self.start_update)
+        else:
+            self._build_wizard_ui()
+            self.setFixedSize(600, 430)
+
+    # -- helpers ------------------------------------------------------------
+
+    @property
+    def version(self) -> str:
+        return self.info.get("version", "")
+
+    # -- wizard UI ------------------------------------------------------------
+
+    def _build_wizard_ui(self):
+        self._build_frame(f"FlowBench {self.version}",
+                          self.t("网络压力测试工具 · 安装向导", "Network stress testing tool · Setup"))
+        self.welcomePage = self._build_welcome_page()
+        self.progressPage = self._build_progress_page()
+        self.donePage = self._build_done_page()
+        for page in (self.welcomePage, self.progressPage, self.donePage):
+            self.pages.addWidget(page)
+        self._refresh_welcome()
 
     def _build_welcome_page(self):
         page, layout = self._page()
@@ -345,12 +369,6 @@ class SetupWindow(QWidget):
                 return False
         return True
 
-    def _warn(self, title, text):
-        box = MessageBox(title, text, self)
-        box.cancelButton.hide()
-        box.yesButton.setText(self.t("确定", "OK"))
-        box.exec()
-
     def _run_steps(self, stage: bool):
         session = self.session
 
@@ -385,8 +403,7 @@ class SetupWindow(QWidget):
         else:
             text = self.t("正在解压：", "Extracting: ") + detail if detail else ""
         label = self.progressDetail if not self.update_mode else self.updateDetail
-        metrics = label.fontMetrics()
-        label.setText(metrics.elidedText(text, Qt.ElideMiddle, max(200, label.width())))
+        self._set_elided(label, text)
 
     def _cancel_install(self):
         if self.worker and self.busy:

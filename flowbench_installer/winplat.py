@@ -3,7 +3,7 @@
 Everything here is a thin wrapper over a documented Win32 API.  On other
 platforms the functions degrade to harmless no-ops so the installer logic can
 be tested headless.  Only the standard library is imported at module level,
-because the uninstaller is built without third-party packages.
+so the silent uninstall path never needs Qt or other third-party packages.
 """
 from __future__ import annotations
 

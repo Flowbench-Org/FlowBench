@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- `FlowBench-Uninstall.exe` now opens the same Fluent window as the setup wizard instead of plain message boxes: confirm (with the install location), a progress bar that names each file being removed, and a done page. It follows FlowBench's own language, light/dark theme and accent colour, falling back to the Windows language.
+- The uninstaller can also delete `%APPDATA%\FlowBench` (settings, authorized targets, plugins, logs) when **Also delete my settings, plugins and logs** is ticked; it is unticked by default and the box warns that this cannot be undone.
+- A running FlowBench or a locked install folder now gets the same "quit FlowBench, then Retry" prompt as setup. `/S` and the other quiet switches still uninstall without any window.
+- Reinstalling with the setup wizard uses the language, theme and accent from an existing FlowBench install instead of the system defaults.
+- The uninstaller now bundles Qt, so it is larger than the old standard-library one; unused Qt parts (software OpenGL, PDF, QML, networking, Qt translations) are left out to keep it small.
+
 ## [1.2.9] - 2026-11-04
 
 ### Changed

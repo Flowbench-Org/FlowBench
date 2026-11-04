@@ -64,7 +64,9 @@ Check the built-in `example_hello.py` / `example_dns.py` plugins in the plugin f
 
 Later updates install from inside the app: **Settings → Check for Updates → Update now** downloads
 the new installer with a progress bar, closes FlowBench, updates it and reopens it. Uninstall from
-Windows **Settings → Apps**; settings and logs in `%APPDATA%\FlowBench` are kept.
+Windows **Settings → Apps**: the uninstaller uses the same window as setup, in FlowBench's language
+and theme. Settings, plugins and logs in `%APPDATA%\FlowBench` are kept unless you tick
+**Also delete my settings, plugins and logs**.
 
 ### Run from Source (Developers)
 
@@ -169,7 +171,8 @@ FlowBench v1.1.0 内置完整插件平台，可以自由扩展功能：
 
 之后的更新在软件内完成：**设置 → 检查更新 → 立即更新**，带进度条下载新版安装包，
 自动关闭 FlowBench、完成更新并重新打开。卸载在 Windows **设置 → 应用** 中进行，
-`%APPDATA%\FlowBench` 里的设置和日志会保留。
+卸载程序和安装向导是同一套界面，语言和深浅色跟随 FlowBench 的设置。`%APPDATA%\FlowBench`
+里的设置、插件和日志默认保留，勾选 **同时删除我的设置、插件和日志** 才会删除。
 
 ### 从源码运行（开发者）
 

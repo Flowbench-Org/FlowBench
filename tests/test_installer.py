@@ -363,12 +363,15 @@ class UninstallerTests(unittest.TestCase):
             delete_uninstall_entry=p.delete_uninstall_entry, notify_shell=p.notify_shell,
             system_prefers_chinese=lambda: False, wait_for_exit=lambda pid, t: True)
 
+    def no_user_prefs(self):
+        return mock.patch.object(core, "user_data_dir", lambda environ=None: self.root / "AppData" / "FlowBench")
+
     def test_uninstall_removes_app_shortcuts_and_entry(self):
         marker = core.read_marker(self.target)
         marker["shortcuts"].append(str(self.precious))      # never deleted: not a .lnk
         core.write_marker(self.target, marker)
         prompts = []
-        with self.patched():
+        with self.patched(), self.no_user_prefs():
             code = uninstall_main.uninstall(self.target, quiet=False,
                                             ui=lambda text, title, flags: prompts.append(text) or 6)
         self.assertEqual(code, 0)
@@ -379,7 +382,7 @@ class UninstallerTests(unittest.TestCase):
         self.assertIn("settings", prompts[0])
 
     def test_declining_keeps_everything(self):
-        with self.patched():
+        with self.patched(), self.no_user_prefs():
             code = uninstall_main.uninstall(self.target, quiet=False, ui=lambda *a: 7)
         self.assertEqual(code, 1)
         self.assertTrue((self.target / "FlowBench.exe").exists())
@@ -388,6 +391,59 @@ class UninstallerTests(unittest.TestCase):
     def test_quiet_aliases(self):
         for flag in ("/S", "/VERYSILENT", "--quiet"):
             self.assertTrue(uninstall_main.parse_args([flag]).quiet)
+
+    def test_quiet_uninstall_never_prompts_and_keeps_user_data(self):
+        data = self.root / "AppData" / "FlowBench"
+        (data / "logs").mkdir(parents=True)
+        (data / "settings.json").write_text('{"language": "zh-CN"}', encoding="utf-8")
+        with self.patched(), self.no_user_prefs():
+            code = uninstall_main.uninstall(self.target, quiet=True,
+                                            ui=lambda *a: self.fail("quiet mode prompted"))
+        self.assertEqual(code, 0)
+        self.assertFalse(self.target.exists())
+        self.assertTrue((data / "settings.json").exists())
+
+    def test_session_reports_file_progress_and_can_remove_user_data(self):
+        data = self.root / "AppData" / "FlowBench"
+        (data / "plugins").mkdir(parents=True)
+        (data / "settings.json").write_text("{}", encoding="utf-8")
+        steps = []
+        session = session_mod.UninstallSession(
+            self.target, remove_user_data=True, data_dir=data, platform=self.platform)
+        self.assertEqual(session.version, core.read_marker(self.target)["version"])
+        warnings = session.run(lambda pct, name: steps.append((pct, name)))
+        self.assertEqual(warnings, [])
+        self.assertFalse(self.target.exists())
+        self.assertFalse(data.exists())
+        self.assertIsNone(self.platform.registry)
+        names = [name for pct, name in steps if pct < session.FILES_END]
+        self.assertIn("FlowBench.exe", names)
+        self.assertEqual([pct for pct, _n in steps], sorted(pct for pct, _n in steps))
+        self.assertEqual(steps[-1][0], 100)
+
+    def test_user_data_removal_refuses_other_folders(self):
+        other = self.root / "AppData" / "Important"
+        other.mkdir(parents=True)
+        self.assertFalse(core.remove_user_data(other))
+        self.assertTrue(other.exists())
+        self.assertTrue(core.remove_user_data(self.root / "AppData" / "FlowBench"))   # missing: fine
+
+    def test_user_prefs_follow_flowbench_settings(self):
+        data = self.root / "AppData" / "FlowBench"
+        data.mkdir(parents=True)
+        self.assertEqual(core.read_user_prefs(data), {"lang": None, "theme": None, "accent": None})
+        (data / "settings.json").write_text(
+            '{"language": "en-US", "theme": "dark", "theme_color": "#5B5FC7"}', encoding="utf-8")
+        self.assertEqual(core.read_user_prefs(data), {"lang": "en", "theme": "dark", "accent": "#5B5FC7"})
+        (data / "settings.json").write_text(
+            '{"language": "auto", "theme": "blue", "theme_color": "red"}', encoding="utf-8")
+        self.assertEqual(core.read_user_prefs(data), {"lang": None, "theme": None, "accent": None})
+        (data / "settings.json").write_text("not json", encoding="utf-8")
+        self.assertEqual(core.read_user_prefs(data)["lang"], None)
+        self.assertEqual(core.user_data_dir({"APPDATA": str(self.root)}), self.root / "FlowBench")
+        with mock.patch.object(winplat, "system_prefers_chinese", lambda: True):
+            self.assertTrue(uninstall_main.prefers_chinese({"lang": None}))
+            self.assertFalse(uninstall_main.prefers_chinese({"lang": "en"}))
 
 
 def app():
@@ -403,6 +459,106 @@ def wait_for(condition, timeout_ms=10000):
             return True
         QTest.qWait(20)
     return bool(condition())
+
+
+class UninstallWindowTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        app()
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        payload, info = build_payload(self.root)
+        self.version = info["version"]
+        self.platform = FakePlatform(self.root)
+        self.target = self.root / "Programs" / "FlowBench"
+        s = SetupSession(payload, info, self.target, platform=self.platform)
+        s.stage()
+        s.activate()
+        s.finalize()
+        self.data = self.root / "AppData" / "FlowBench"
+        (self.data / "plugins").mkdir(parents=True)
+        (self.data / "settings.json").write_text("{}", encoding="utf-8")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def window(self, chinese=False):
+        from flowbench_installer.uninstall_gui import UninstallWindow
+        win = UninstallWindow(self.target, data_dir=self.data, chinese=chinese,
+                              platform=self.platform)
+        win.show()
+        return win
+
+    def test_uninstalls_and_keeps_user_data_by_default(self):
+        win = self.window()
+        self.assertEqual(win.titleLabel.text(), f"FlowBench {self.version}")
+        self.assertEqual(win.uninstallButton.text(), "Uninstall")
+        self.assertFalse(win.removeDataCheck.isChecked())
+        self.assertIn("are kept", win.dataNote.text())
+        self.assertIn(str(self.data), win.dataNote.text())
+        win.uninstallButton.click()
+        self.assertTrue(wait_for(lambda: win.pages.currentWidget() is win.donePage, 10000))
+        self.assertFalse(self.target.exists())
+        self.assertIsNone(self.platform.registry)
+        self.assertFalse(self.platform.shortcut_paths()["start_menu"].exists())
+        self.assertTrue((self.data / "settings.json").exists())
+        self.assertIn("kept", win.doneDetail.text())
+        self.assertEqual(win.progressBar.value(), 100)
+        finished = []
+        win.finished.connect(finished.append)
+        win.finishButton.click()
+        self.assertEqual(finished, [True])
+        self.assertTrue(win.succeeded)
+        self.assertFalse(win.isVisible())
+
+    def test_ticking_the_box_deletes_settings_plugins_and_logs(self):
+        win = self.window()
+        win.removeDataCheck.setChecked(True)
+        self.assertIn("cannot be undone", win.dataNote.text())
+        win.uninstallButton.click()
+        self.assertTrue(wait_for(lambda: win.pages.currentWidget() is win.donePage, 10000))
+        self.assertFalse(self.data.exists())
+        self.assertIn("deleted too", win.doneDetail.text())
+        win.close()
+
+    def test_running_app_must_be_closed_first(self):
+        self.platform.running = [1234]
+        win = self.window()
+        asked = []
+        win.ask_retry = lambda title, text: asked.append(title) or False
+        win.uninstallButton.click()
+        self.assertEqual(asked, ["FlowBench is running"])
+        self.assertIs(win.pages.currentWidget(), win.confirmPage)
+        self.assertTrue((self.target / "FlowBench.exe").exists())
+        win.close()
+
+    def test_locked_folder_shows_retry_and_close_is_blocked_while_busy(self):
+        win = self.window()
+        win.ask_retry = lambda title, text: False
+        with mock.patch.object(core, "uninstall_files",
+                               side_effect=core.AppInUseError("locked", "被占用")):
+            win.uninstallButton.click()
+            self.assertTrue(wait_for(lambda: win.retryButton.isVisible()))
+        self.assertEqual(win.progressTitle.text(), "Uninstall did not finish")
+        self.assertIn("locked", win.progressError.text())
+        self.assertTrue((self.target / "FlowBench.exe").exists())
+        win.retryButton.click()                       # second attempt succeeds
+        self.assertTrue(win.busy or win.succeeded)
+        win.close()
+        self.assertTrue(win.isVisible() or win.succeeded)
+        self.assertTrue(wait_for(lambda: win.pages.currentWidget() is win.donePage, 10000))
+        self.assertFalse(self.target.exists())
+        win.close()
+
+    def test_chinese_text(self):
+        win = self.window(chinese=True)
+        self.assertEqual(win.windowTitle(), "卸载 FlowBench")
+        self.assertEqual(win.uninstallButton.text(), "卸载")
+        self.assertIn("同时删除我的设置", win.removeDataCheck.text())
+        self.assertIn("卸载向导", win.subtitleLabel.text())
+        win.close()
 
 
 class SetupWindowTests(unittest.TestCase):

@@ -305,8 +305,13 @@ class InstallJob:
 
 # --------------------------------------------------------------- uninstall --
 
-def uninstall_files(target: Path) -> None:
-    """Delete an installed FlowBench folder (user data lives elsewhere)."""
+def uninstall_files(target: Path, progress: Optional[ProgressFn] = None) -> None:
+    """Delete an installed FlowBench folder (user data lives elsewhere).
+
+    The folder is first renamed aside, so a locked file (FlowBench still
+    running) fails before anything is deleted; ``progress(done, total, name)``
+    then reports each deleted file.
+    """
     target = Path(target)
     check_target(target)
     if not target.exists():
@@ -321,4 +326,74 @@ def uninstall_files(target: Path) -> None:
     except OSError as exc:
         raise AppInUseError(f"{target} is in use. Close FlowBench and try again.",
                             f"{target} 正在被使用，请先退出 FlowBench 再重试。") from exc
-    remove_tree(old)
+    remove_tree_with_progress(old, progress)
+
+
+def remove_tree_with_progress(path: Path, progress: Optional[ProgressFn] = None) -> bool:
+    """``remove_tree`` that reports ``progress(done, total, relative name)``."""
+    path = Path(path)
+    files = []
+    for root, _dirs, names in os.walk(path):
+        files.extend(Path(root) / name for name in names)
+    total = len(files)
+    for done, file in enumerate(files, 1):
+        try:
+            file.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            try:
+                os.chmod(file, stat.S_IWRITE)
+                file.unlink()
+            except OSError:
+                pass            # remove_tree below gets one more try
+        if progress:
+            progress(done, total, file.relative_to(path).as_posix())
+    return remove_tree(path) if path.exists() else True
+
+
+# -------------------------------------------------------------- user data --
+
+def user_data_dir(environ=None) -> Path:
+    """Where FlowBench keeps settings, plugins and logs (same rule as the app)."""
+    environ = os.environ if environ is None else environ
+    return Path(environ.get("APPDATA") or os.path.expanduser("~")) / APP_NAME
+
+
+def read_user_prefs(data_dir: Path) -> dict:
+    """Language, theme and accent from FlowBench's settings.json.
+
+    Returns ``{"lang": "zh"|"en"|None, "theme": "dark"|"light"|None,
+    "accent": "#RRGGBB"|None}``; None means "not set, use the system".
+    """
+    prefs = {"lang": None, "theme": None, "accent": None}
+    try:
+        with open(Path(data_dir) / "settings.json", "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return prefs
+    if not isinstance(data, dict):
+        return prefs
+    language = str(data.get("language") or "")
+    if language.lower().startswith("zh"):
+        prefs["lang"] = "zh"
+    elif language.lower().startswith("en"):
+        prefs["lang"] = "en"
+    if data.get("theme") in ("dark", "light"):
+        prefs["theme"] = data["theme"]
+    accent = data.get("theme_color")
+    if isinstance(accent, str) and re.fullmatch(r"#[0-9A-Fa-f]{6}", accent):
+        prefs["accent"] = accent
+    return prefs
+
+
+def remove_user_data(data_dir: Path) -> bool:
+    """Delete FlowBench's user-data folder; refuses anything not named FlowBench."""
+    data_dir = Path(data_dir)
+    if data_dir.name != APP_NAME or data_dir.parent == data_dir:
+        return False
+    if not data_dir.exists():
+        return True
+    if not data_dir.is_dir():
+        return False
+    return remove_tree(data_dir)

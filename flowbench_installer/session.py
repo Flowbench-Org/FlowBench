@@ -1,4 +1,4 @@
-"""One install or update run: stage, swap in, then register with Windows."""
+"""One install, update or uninstall run, including the Windows integration."""
 from __future__ import annotations
 
 import datetime as _dt
@@ -117,6 +117,77 @@ class SetupSession:
 
     def launch_app(self) -> None:
         self.platform.launch_detached(self.exe, (), self.target)
+
+
+class UninstallSession:
+    """Remove an installed FlowBench: files, shortcuts, the Settings → Apps
+    entry and, if asked, the user's settings/plugins/logs.
+
+    Used by both the uninstall window and the silent ``/S`` mode.
+    """
+
+    FILES_END = 85       # deleting the install folder maps to 0-85 %
+
+    def __init__(self, target: Path, *, remove_user_data: bool = False,
+                 data_dir: Optional[Path] = None, parent_pid: int = 0,
+                 wait_timeout: float = 30.0, platform=winplat):
+        self.target = Path(target)
+        self.remove_user_data = remove_user_data
+        self.data_dir = Path(data_dir) if data_dir else core.user_data_dir()
+        self.parent_pid = int(parent_pid or 0)
+        self.wait_timeout = wait_timeout
+        self.platform = platform
+        self.marker = core.read_marker(self.target)
+        self.warnings: List[tuple] = []   # (kind, subject, detail)
+
+    @property
+    def version(self) -> str:
+        return str(self.marker.get("version") or "")
+
+    def blocking_pids(self) -> List[int]:
+        """FlowBench processes that must exit before uninstalling."""
+        return self.platform.running_instances([self.target / core.APP_EXE])
+
+    def run(self, progress: Optional[Progress] = None, cancelled=None) -> List[tuple]:
+        p = self.platform
+        self.warnings = []
+        if self.parent_pid:
+            # The first-stage uninstaller still has its exe in the folder open.
+            p.wait_for_exit(self.parent_pid, self.wait_timeout)
+        if progress:
+            progress(1, "")
+
+        def on_file(done, total, name):
+            if progress:
+                progress(1 + int(done * (self.FILES_END - 1) / total) if total else 1, name)
+
+        core.uninstall_files(self.target, on_file)
+        if progress:
+            progress(self.FILES_END + 3, "")
+        self._remove_shortcuts()
+        registered = p.registered_install_dir()
+        if registered is None or _same_dir(registered, self.target):
+            try:
+                p.delete_uninstall_entry()
+            except Exception as exc:
+                self.warnings.append(("registry", "", str(exc)))
+        if self.remove_user_data:
+            if progress:
+                progress(94, str(self.data_dir))
+            if not core.remove_user_data(self.data_dir):
+                self.warnings.append(("user_data", str(self.data_dir), ""))
+        p.notify_shell()
+        if progress:
+            progress(100, "")
+        return self.warnings
+
+    def _remove_shortcuts(self) -> None:
+        listed = self.marker.get("shortcuts")
+        if not isinstance(listed, list):
+            listed = [str(path) for path in self.platform.shortcut_paths().values()]
+        # Only ever delete .lnk files, whatever the marker says.
+        self.platform.remove_files([path for path in listed
+                                    if isinstance(path, str) and path.lower().endswith(".lnk")])
 
 
 def _same_dir(a, b) -> bool:

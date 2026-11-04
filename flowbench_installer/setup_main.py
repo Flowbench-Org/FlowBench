@@ -47,11 +47,14 @@ def main(argv=None) -> int:
 
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setApplicationName("FlowBench Setup")
-    if args.theme:
-        setTheme(Theme.DARK if args.theme == "dark" else Theme.LIGHT)
+    # Reinstalling or repairing: look like the FlowBench the user already has.
+    prefs = core.read_user_prefs(core.user_data_dir())
+    theme = args.theme or prefs["theme"]
+    if theme:
+        setTheme(Theme.DARK if theme == "dark" else Theme.LIGHT)
     else:
         setTheme(Theme.AUTO)
-    accent = QColor(args.accent) if args.accent else QColor()
+    accent = QColor(args.accent or prefs["accent"] or "")
     setThemeColor(accent if accent.isValid() else QColor(DEFAULT_ACCENT))
 
     try:
@@ -65,7 +68,8 @@ def main(argv=None) -> int:
 
     from flowbench_installer.gui import SetupWindow
 
-    chinese = None if args.lang is None else args.lang == "zh"
+    lang = args.lang or prefs["lang"]
+    chinese = None if lang is None else lang == "zh"
     window = SetupWindow(payload_dir / core.PAYLOAD_NAME, info,
                          update=args.update,
                          target=Path(args.dir) if args.dir else None,
