@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.10] - 2026-11-04
 
 ### Changed
 
@@ -9,6 +9,12 @@
 - A running FlowBench or a locked install folder now gets the same "quit FlowBench, then Retry" prompt as setup. `/S` and the other quiet switches still uninstall without any window.
 - Reinstalling with the setup wizard uses the language, theme and accent from an existing FlowBench install instead of the system defaults.
 - The uninstaller now bundles Qt, so it is larger than the old standard-library one; unused Qt parts (software OpenGL, PDF, QML, networking, Qt translations) are left out to keep it small.
+
+### Verified
+
+- Checked the uninstall window's confirm, progress and done pages in Chinese light, Chinese dark and English light, and ran the real uninstall entry point end to end (English, dark theme and a custom accent taken from FlowBench's settings).
+- Covered the shared uninstall session, keeping or deleting user data, a running FlowBench, a locked folder with Retry, silent mode and preference parsing with automated tests.
+- Passed the full automated test suite (133 tests, 1659 subtests).
 
 ## [1.2.9] - 2026-11-04
 
