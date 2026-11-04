@@ -28,7 +28,7 @@ FlowBench is a Windows desktop application for network stress testing and perfor
 | 🔥 **Stress Test** | HTTP / HTTPS / TCP / UDP / ICMP protocols; live QPS, latency percentiles (P50/P90/P99), **total sent traffic** (auto-scaled B/KB/MB/GB/TB), classified failure reasons |
 | 🤝 **Collaborative Test** | Host / node modes, one-click invite code copy, IPv4+IPv6 dual-stack listening, UPnP automatic port mapping (Internet collaboration supported) |
 | 🧩 **Plugin System** | Full plugin platform: local plugin management (enable/disable/reload), **built-in plugin marketplace**, one-click install & update, custom icons, and **one-click publish/unpublish to GitHub** — no manual token required |
-| 📈 **Monitoring** | Real-time CPU / memory / network speed curves, smooth wheel zoom, double-click to resume live scrolling |
+| 📈 **Monitoring** | Real-time CPU / memory / network speed curves, smooth animated wheel zoom on the time axis, drag to pan when zoomed, double-click to resume live scrolling |
 | ⚙️ **Settings** | Dark / light theme, Chinese-English language selection (restart to fully apply), default parameters, audit log export |
 
 ### Security & Compliance
@@ -133,7 +133,7 @@ FlowBench 是一款 Windows 桌面端的网络压力测试与性能监控工具�
 | 🔥 **压力测试** | HTTP / HTTPS / TCP / UDP / ICMP 五种协议，实时 QPS、延迟分位数（P50/P90/P99）、**总发送流量统计**（自动换算 B/KB/MB/GB/TB）、失败原因分类统计 |
 | 🤝 **协同测试** | 主控邀请 / 节点加入模式，邀请码一键复制，IPv4+IPv6 双栈监听，UPnP 自动端口映射（支持外网协同） |
 | 🧩 **插件系统** | 完整插件平台：本地插件管理（启用/禁用/重载）、**内置插件市场**、一键安装与更新、自定义图标、**一键发布/下架到 GitHub** —— 无需手动生成令牌 |
-| 📈 **性能监控** | CPU / 内存 / 网速实时曲线，鼠标滚轮平滑缩放，双击恢复实时滚动 |
+| 📈 **性能监控** | CPU / 内存 / 网速实时曲线，鼠标滚轮带动画平滑缩放时间段，放大后可左右拖动，双击恢复实时滚动 |
 | ⚙️ **设置** | 深色 / 浅色主题，中英双语选择（重启后完整生效），默认参数配置，审计日志导出 |
 
 ### 安全与合规设计

@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Charts on Home and Monitor zoom smoothly: each wheel notch animates the time axis to 80 % (or 125 %) around the point under the cursor, and the value axis fits the visible part. Once zoomed, drag left or right to pan, including back to where you were; double-click or zoom all the way out to resume live scrolling. The left/right-drag box zoom, which could not be dragged back, is removed. At the full view, scrolling down over a chart scrolls the page.
 - Ctrl+1…Ctrl+6 now follow the sidebar order: Ctrl+4 opens Server Agents (previously unbound), Ctrl+5 Monitor and Ctrl+6 Plugins.
 - Server Agents: the control URL and token each take a full row under one label column, so a URL is readable at the minimum window width.
 - The trend charts on Home and Monitor use the full card height; the Home chart no longer drops axis labels at 1360×860.

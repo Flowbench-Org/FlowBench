@@ -8,7 +8,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("APPDATA", os.path.join(tempfile.gettempdir(), "FlowBench-ui-polish-tests"))
 
-from PySide6.QtCore import QAbstractAnimation, QEvent, QPoint, Qt
+from PySide6.QtCore import QAbstractAnimation, QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPalette
 from PySide6.QtWidgets import QApplication, QWidget
 from qfluentwidgets import Theme, setTheme
@@ -233,6 +233,99 @@ class UiPolishTests(unittest.TestCase):
         plot = chart.chart().plotArea()
         self.assertGreater(plot.height(), 115, plot)
         chart.deleteLater()
+
+
+class ChartZoomTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def setUp(self):
+        import math
+        self.chart = HoverChart(window_points=60, y_min=0.0)
+        self.chart.add_series("CPU %", "#0078D4", " %")
+        self.chart.resize(900, 260)
+        self.chart.show()
+        self.data = [30 + 20 * math.sin(i / 5) for i in range(60)]
+        self.chart.set_data({"CPU %": self.data})
+        self.wait(50)
+
+    def tearDown(self):
+        self.chart.close()
+        self.chart.deleteLater()
+        self.wait(10)
+
+    def wait(self, ms):
+        from PySide6.QtTest import QTest
+        QTest.qWait(ms)
+
+    def wheel(self, x_frac, notches):
+        from PySide6.QtGui import QWheelEvent
+        plot = self.chart.chart().plotArea()
+        pos = QPointF(plot.left() + plot.width() * x_frac, plot.center().y())
+        event = QWheelEvent(pos, self.chart.mapToGlobal(pos), QPoint(), QPoint(0, int(120 * notches)),
+                            Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False)
+        QApplication.sendEvent(self.chart.viewport(), event)
+        return event.isAccepted()
+
+    def drag(self, x_from, x_to):
+        from PySide6.QtTest import QTest
+        viewport = self.chart.viewport()
+        y = int(self.chart.chart().plotArea().center().y())
+        QTest.mousePress(viewport, Qt.LeftButton, Qt.NoModifier, QPoint(x_from, y))
+        QTest.mouseMove(viewport, QPoint(x_to, y))
+        QTest.mouseRelease(viewport, Qt.LeftButton, Qt.NoModifier, QPoint(x_to, y))
+
+    def test_box_zoom_is_gone(self):
+        from PySide6.QtCharts import QChartView
+        self.assertEqual(self.chart.rubberBand(), QChartView.RubberBand.NoRubberBand)
+        self.drag(200, 600)      # not zoomed: a drag changes nothing
+        self.assertEqual(self.chart.visible_range(), (0.0, 60.0))
+        self.assertFalse(self.chart.is_zoomed())
+
+    def test_wheel_zooms_one_step_around_the_cursor_with_animation(self):
+        self.assertTrue(self.wheel(0.75, 1))
+        self.wait(40)
+        x0, x1 = self.chart.visible_range()
+        self.assertTrue(0.0 < x0 < 9.0 and 48.0 < x1 < 60.0, (x0, x1))   # still moving
+        self.wait(400)
+        x0, x1 = self.chart.visible_range()
+        self.assertAlmostEqual(x1 - x0, 48.0, places=3)      # one notch = 80 %
+        self.assertAlmostEqual(x0, 9.0, delta=0.05)          # 45 stays under the cursor
+        self.assertTrue(self.chart.is_zoomed())
+
+    def test_zoomed_chart_pans_back_and_keeps_its_range_on_new_data(self):
+        self.wheel(0.5, 3)
+        self.wait(400)
+        x0, x1 = self.chart.visible_range()
+        span = x1 - x0
+        self.drag(300, 600)                                  # drag right = go back in time
+        self.assertLess(self.chart.visible_range()[0], x0)
+        self.drag(300, 3000)                                 # far past the start
+        self.assertAlmostEqual(self.chart.visible_range()[0], 0.0, places=6)
+        self.assertAlmostEqual(self.chart.visible_range()[1] - 0.0, span, places=6)
+        self.drag(600, 300)
+        moved = self.chart.visible_range()
+        self.assertGreater(moved[0], 0.0)
+        self.chart.set_data({"CPU %": self.data[1:] + [90.0]})
+        self.assertEqual(self.chart.visible_range(), moved)
+
+    def test_double_click_and_zooming_out_resume_live_view(self):
+        from PySide6.QtTest import QTest
+        self.wheel(0.5, 2)
+        self.wait(400)
+        QTest.mouseDClick(self.chart.viewport(), Qt.LeftButton, Qt.NoModifier, QPoint(400, 120))
+        self.wait(400)
+        self.assertEqual(self.chart.visible_range(), (0.0, 60.0))
+        self.assertFalse(self.chart.is_zoomed())
+        self.wheel(0.5, 1)
+        self.wait(400)
+        self.wheel(0.5, -6)                                  # zooming out past the full view
+        self.wait(400)
+        self.assertEqual(self.chart.visible_range(), (0.0, 60.0))
+        self.assertFalse(self.chart.is_zoomed())
+        # Already showing everything: the wheel scrolls the page instead.
+        self.assertFalse(self.wheel(0.5, -1))
 
 
 class ReportDurationTests(unittest.TestCase):
