@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- When the in-app update download fails, the dialog says why in plain words (no connection or the download broke off, GitHub refused the file, the file was incomplete or damaged, or it could not be saved) and adds **Open in browser** next to **Retry**. It opens the release page in the default browser and names the installer file to download and run. The technical error is kept in the message's tooltip.
+- If the browser cannot be opened, the dialog shows the release page address instead of closing.
+- A failed manual **Check for Updates** now has an **Open release page** link, since a browser may get through where the app cannot (for example behind a proxy).
+- Japanese language pack 1.0.4 translates the new messages.
+
 ## [1.2.10] - 2026-11-04
 
 ### Changed

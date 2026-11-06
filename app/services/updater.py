@@ -39,6 +39,20 @@ class DownloadCancelled(Exception):
     pass
 
 
+def download_error_kind(exc: BaseException) -> str:
+    """Sort a failed download into what the user can do about it."""
+    if isinstance(exc, DownloadError):
+        return "corrupt"            # wrong size or hash: the file was not kept
+    if isinstance(exc, requests.HTTPError):
+        return "http"
+    # Checked before OSError: requests' exceptions derive from it.
+    if isinstance(exc, requests.RequestException):
+        return "network"
+    if isinstance(exc, OSError):
+        return "disk"
+    return "other"
+
+
 def pick_setup_asset(release: dict):
     """Return the installer asset of a GitHub release, or None."""
     if not isinstance(release, dict):
@@ -255,11 +269,13 @@ def check_for_updates(parent=None, manual: bool = False, on_finished=None):
             try:
                 if not d.get("ok"):
                     if manual:
-                        from qfluentwidgets import InfoBar
-                        InfoBar.error(L("检查更新失败", "Update check failed"),
-                                      L(f"无法连接 GitHub：{d.get('error', '')}",
-                                        f"Cannot reach GitHub: {d.get('error', '')}"),
-                                      parent=parent, duration=5000)
+                        from qfluentwidgets import HyperlinkButton, InfoBar
+                        bar = InfoBar.error(L("检查更新失败", "Update check failed"),
+                                            L(f"无法连接 GitHub：{d.get('error', '')}",
+                                              f"Cannot reach GitHub: {d.get('error', '')}"),
+                                            parent=parent, duration=8000)
+                        # The browser may get through where the app cannot (proxy, VPN).
+                        bar.addWidget(HyperlinkButton(LATEST_URL, L("打开发布页", "Open release page"), bar))
                 elif d.get("newer"):
                     # 自动检查时，如果该版本已被用户跳过，不再弹窗
                     if not manual and settings.skip_version == d["tag"]:
@@ -374,34 +390,61 @@ class _Downloader(QObject):
         except DownloadCancelled:
             self.done.emit({"ok": False, "cancelled": True})
         except Exception as e:
-            self.done.emit({"ok": False, "error": str(e)})
+            self.done.emit({"ok": False, "error": str(e), "kind": download_error_kind(e)})
 
 
 def _format_mb(n: int) -> str:
     return f"{n / (1024 * 1024):.1f} MB"
 
 
-def _make_download_dialog(parent, tag, asset, L):
+def _download_failure_text(kind: str, L) -> str:
+    if kind == "network":
+        return L("无法连接 GitHub，或者下载中途断开了。", "Could not reach GitHub, or the download was interrupted.")
+    if kind == "http":
+        return L("GitHub 暂时无法提供这个文件。", "GitHub could not provide the file right now.")
+    if kind == "corrupt":
+        return L("下载的文件不完整或已损坏，已经删除。", "The downloaded file was incomplete or damaged, so it was deleted.")
+    if kind == "disk":
+        return L("无法保存安装包，请检查磁盘空间。", "Could not save the installer. Check that there is enough disk space.")
+    return L("下载没有完成。", "The download did not finish.")
+
+
+def _make_download_dialog(parent, tag, asset, L, page_url=None):
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QPushButton
     from qfluentwidgets import CaptionLabel, MessageBoxBase, ProgressBar, SubtitleLabel
 
+    name = str(asset.get("name") or f"FlowBench-Setup-{tag.lstrip('vV')}.exe")
+
     class UpdateDownloadDialog(MessageBoxBase):
-        """下载新版安装包，带进度条；失败可重试，取消即停止下载。"""
+        """下载新版安装包，带进度条；失败可重试，或改用浏览器从发布页下载。"""
 
         def __init__(self):
             super().__init__(parent)
             self.setup_path = None
+            self.page_url = page_url or LATEST_URL
+            self.setup_name = name
+            self.opened_browser = False
             self.titleLabel = SubtitleLabel(L(f"正在下载 FlowBench {tag}", f"Downloading FlowBench {tag}"), self)
             self.bar = ProgressBar(self)
             self.bar.setRange(0, 1000)
             self.bar.setValue(0)
             self.detail = CaptionLabel(L("正在连接 GitHub…", "Connecting to GitHub…"), self)
+            self.detail.setWordWrap(True)
             self.viewLayout.addWidget(self.titleLabel)
             self.viewLayout.addSpacing(6)
             self.viewLayout.addWidget(self.bar)
             self.viewLayout.addWidget(self.detail)
-            self.widget.setFixedWidth(460)
+            self.widget.setFixedWidth(500)       # three equal buttons once it fails
             self.yesButton.setText(L("重试", "Retry"))
             self.yesButton.hide()
+            # Same look as the dialog's own secondary button.
+            self.browserButton = QPushButton(L("用浏览器下载", "Open in browser"), self.buttonGroup)
+            self.browserButton.setObjectName("cancelButton")
+            self.browserButton.setAttribute(Qt.WA_LayoutUsesWidgetRect)
+            self.browserButton.clicked.connect(self.open_in_browser)
+            self.buttonLayout.insertWidget(1, self.browserButton, 1, Qt.AlignVCenter)
+            self.browserButton.hide()
             self.cancelButton.setText(L("取消", "Cancel"))
             self._started = 0.0
             self.downloader = _Downloader(asset, setup_path_for(tag))
@@ -411,8 +454,12 @@ def _make_download_dialog(parent, tag, asset, L):
 
         def start(self):
             self.yesButton.hide()
+            self.browserButton.hide()
+            self.cancelButton.setText(L("取消", "Cancel"))
+            self.detail.setToolTip("")
             self.titleLabel.setText(L(f"正在下载 FlowBench {tag}", f"Downloading FlowBench {tag}"))
             self.detail.setText(L("正在连接 GitHub…", "Connecting to GitHub…"))
+            self.bar.setError(False)
             self.bar.setValue(0)
             self._started = time.monotonic()
             self.downloader.go()
@@ -425,6 +472,15 @@ def _make_download_dialog(parent, tag, asset, L):
         def reject(self):
             self.downloader.cancel()
             super().reject()
+
+        def open_in_browser(self):
+            if QDesktopServices.openUrl(QUrl(self.page_url)):
+                self.opened_browser = True
+                self.reject()
+                return
+            self.detail.setText(L(f"无法打开浏览器，请手动访问：\n{self.page_url}",
+                                  f"Could not open a browser. Visit this page yourself:\n{self.page_url}"))
+            self.detail.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
         def _on_progress(self, done: int, total: int):
             elapsed = max(0.001, time.monotonic() - self._started)
@@ -443,8 +499,17 @@ def _make_download_dialog(parent, tag, asset, L):
                 self.accept()
             elif not result.get("cancelled"):
                 self.titleLabel.setText(L("下载失败", "Download failed"))
-                self.detail.setText(result.get("error", ""))
+                reason = _download_failure_text(result.get("kind", "other"), L)
+                # The file name on its own line: it has no spaces to wrap at.
+                hint = L(f"点“重试”再试一次，或者点“用浏览器下载”，从发布页下载并运行：\n{name}",
+                         f"Click Retry to try again, or Open in browser to download and run "
+                         f"this file from the release page:\n{name}")
+                self.detail.setText(f"{reason}\n{hint}")
+                self.detail.setToolTip(result.get("error", ""))    # the technical detail
+                self.bar.setError(True)
                 self.yesButton.show()
+                self.browserButton.show()
+                self.cancelButton.setText(L("关闭", "Close"))
 
     return UpdateDownloadDialog()
 
@@ -455,8 +520,13 @@ def start_self_update(parent, tag, asset, url=None):
     from app.ui.i18n import L, current_lang
     from app.services.settings import settings
 
-    box = _make_download_dialog(parent, tag, asset, L)
+    box = _make_download_dialog(parent, tag, asset, L, url)
     if not box.exec() or not box.setup_path:
+        if box.opened_browser:
+            InfoBar.success(L("已在浏览器中打开发布页", "Opened the release page in your browser"),
+                            L(f"下载 {box.setup_name} 后运行它，就能完成更新。",
+                              f"Download {box.setup_name} and run it to finish updating."),
+                            parent=parent, duration=8000)
         return False
 
     try:

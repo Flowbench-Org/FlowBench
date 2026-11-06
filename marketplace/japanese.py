@@ -1,4 +1,4 @@
-"""Standalone Japanese interface pack for FlowBench 1.2.8.
+"""Standalone Japanese interface pack for FlowBench 1.2.10.
 
 Import this file from the local plugin page. Enable only one language pack
 at a time. Disable the pack and restart to fully restore the host language.
@@ -391,6 +391,17 @@ _RESOURCES = [
     ('プラグイン {#0} 個', '共 {#0} 个插件', '{#0} plugin(s) total'),
     ('公開の取り下げに失敗しました', '下架失败', 'Unpublish failed'),
     ('ダウンロードに失敗しました', '下载失败', 'Download failed'),
+    ('ブラウザーで開く', '用浏览器下载', 'Open in browser'),
+    ('GitHub に接続できないか、ダウンロードが途中で切断されました。', '无法连接 GitHub，或者下载中途断开了。', 'Could not reach GitHub, or the download was interrupted.'),
+    ('GitHub は現在このファイルを提供できません。', 'GitHub 暂时无法提供这个文件。', 'GitHub could not provide the file right now.'),
+    ('ダウンロードしたファイルが不完全または破損していたため、削除しました。', '下载的文件不完整或已损坏，已经删除。', 'The downloaded file was incomplete or damaged, so it was deleted.'),
+    ('インストーラーを保存できません。ディスクの空き容量を確認してください。', '无法保存安装包，请检查磁盘空间。', 'Could not save the installer. Check that there is enough disk space.'),
+    ('ダウンロードが完了しませんでした。', '下载没有完成。', 'The download did not finish.'),
+    ('「再試行」でもう一度試すか、「ブラウザーで開く」でリリースページから次のファイルをダウンロードして実行してください：\n{#0}', '点“重试”再试一次，或者点“用浏览器下载”，从发布页下载并运行：\n{#0}', 'Click Retry to try again, or Open in browser to download and run this file from the release page:\n{#0}'),
+    ('ブラウザーを開けません。次のページに手動でアクセスしてください：\n{#0}', '无法打开浏览器，请手动访问：\n{#0}', 'Could not open a browser. Visit this page yourself:\n{#0}'),
+    ('ブラウザーでリリースページを開きました', '已在浏览器中打开发布页', 'Opened the release page in your browser'),
+    ('{#0} をダウンロードして実行すると、更新が完了します。', '下载 {#0} 后运行它，就能完成更新。', 'Download {#0} and run it to finish updating.'),
+    ('リリースページを開く', '打开发布页', 'Open release page'),
     ('{#0}: {#1}', '{#0}：{#1}', '{#0}: {#1}'),
     ('マーケットに公開', '发布插件到市场', 'Publish to Marketplace'),
     ('公開方法（無料・サーバー不要）：\n1. ローカルのプラグインとアイコンを選択します。\n2. 初回の「公開」でブラウザーを開き、一度だけ認証します。\n3. 以降はワンクリックで公開できます。PR のマージ後に公開されます。', '上架流程（免费，无需服务器）：\n1. 选择要发布的本地插件和图标；\n2. 首次点击"一键发布"会打开浏览器，点一次"授权"即可；\n3. 之后每次发布只需一键，PR 合并后即上架。', 'How publishing works (free, no server):\n1. Pick the local plugin and icon;\n2. The first "Publish" click opens your browser for a one-time authorization;\n3. After that every publish is one click. It goes live once the PR is merged.'),
@@ -1023,11 +1034,11 @@ def uninstall():
 class Plugin(FlowBenchPlugin):
     name = ("日语语言包", "Japanese Language Pack")
     title = "日本語言語パック"
-    version = "1.0.3"
+    version = "1.0.4"
     author = "FlowBench"
     description = (
-        "将 FlowBench 1.2.8 的界面、对话框和动态提示转换为日语，兼容深浅色主题；启用即生效。",
-        "Japanese UI, dialogs and dynamic messages for FlowBench 1.2.8; supports light and dark themes."
+        "将 FlowBench 1.2.10 的界面、对话框和动态提示转换为日语，兼容深浅色主题；启用即生效。",
+        "Japanese UI, dialogs and dynamic messages for FlowBench 1.2.10; supports light and dark themes."
     )
     icon = "LANGUAGE"
     category = "ui"

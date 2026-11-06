@@ -808,6 +808,129 @@ class UpdaterTests(unittest.TestCase):
         self.assertEqual((self.root / "FlowBench-Setup-1.2.8.exe").read_bytes(), body)
         self.assertEqual(quits, [parent])
 
+    # -- download failures fall back to the browser ---------------------------
+
+    PAGE = "https://github.com/Carlown/FlowBench/releases/tag/v1.2.11"
+
+    def dead_url(self):
+        import socket
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+        sock.close()                 # nothing listens here: connection refused
+        return f"http://127.0.0.1:{port}/setup.exe"
+
+    def failed_dialog(self):
+        from PySide6.QtWidgets import QWidget
+        from app.ui.i18n import L
+        app()
+        parent = QWidget()
+        parent.resize(900, 700)
+        parent.show()
+        self.addCleanup(parent.deleteLater)
+        asset = {"name": "FlowBench-Setup-1.2.11.exe", "url": self.dead_url(), "size": 0, "sha256": ""}
+        with mock.patch.object(updater, "downloads_dir", return_value=self.root):
+            box = updater._make_download_dialog(parent, "v1.2.11", asset, L, self.PAGE)
+            box.show()
+            self.assertTrue(wait_for(lambda: box.browserButton.isVisible()))
+        return box, L
+
+    def test_download_error_kinds(self):
+        import requests
+        for exc, kind in ((updater.DownloadError("SHA-256 mismatch"), "corrupt"),
+                          (requests.HTTPError("404"), "http"),
+                          (requests.ConnectionError("refused"), "network"),
+                          (requests.Timeout("slow"), "network"),
+                          (requests.exceptions.ChunkedEncodingError("cut"), "network"),
+                          (PermissionError("denied"), "disk"),
+                          (ValueError("?"), "other")):
+            with self.subTest(exc=type(exc).__name__):
+                self.assertEqual(updater.download_error_kind(exc), kind)
+
+    def test_failed_download_explains_and_offers_the_browser(self):
+        box, L = self.failed_dialog()
+        self.assertEqual(box.titleLabel.text(), L("下载失败", "Download failed"))
+        self.assertTrue(box.yesButton.isVisible())
+        self.assertEqual(box.cancelButton.text(), L("关闭", "Close"))
+        self.assertIn(L("无法连接 GitHub，或者下载中途断开了。",
+                        "Could not reach GitHub, or the download was interrupted."), box.detail.text())
+        self.assertIn("FlowBench-Setup-1.2.11.exe", box.detail.text())
+        self.assertTrue(box.detail.toolTip())          # raw error kept for reports
+        # Same width as the other two buttons, between Retry and Close.
+        layout = box.buttonLayout
+        self.assertEqual([layout.itemAt(i).widget() for i in range(3)],
+                         [box.yesButton, box.browserButton, box.cancelButton])
+        self.assertEqual(box.browserButton.width(), box.cancelButton.width())
+
+        # Retry hides the fallback again until the next failure.
+        with mock.patch.object(updater, "downloads_dir", return_value=self.root):
+            box.yesButton.click()
+            self.assertFalse(box.browserButton.isVisible())
+            self.assertEqual(box.cancelButton.text(), L("取消", "Cancel"))
+            self.assertTrue(wait_for(lambda: box.browserButton.isVisible()))
+
+        opened = []
+        with mock.patch.object(updater.QDesktopServices, "openUrl",
+                               side_effect=lambda u: opened.append(u.toString()) or True):
+            box.browserButton.click()
+        self.assertEqual(opened, [self.PAGE])
+        self.assertTrue(box.opened_browser)
+        self.assertEqual(box.result(), 0)
+        self.assertEqual(list(self.root.iterdir()), [])     # no stray partial files
+
+    def test_browser_that_will_not_open_shows_the_address(self):
+        box, _L = self.failed_dialog()
+        with mock.patch.object(updater.QDesktopServices, "openUrl", return_value=False):
+            box.browserButton.click()
+        self.assertFalse(box.opened_browser)
+        self.assertTrue(box.isVisible())
+        self.assertIn(self.PAGE, box.detail.text())
+        box.reject()
+
+    def test_update_now_falls_back_to_the_release_page(self):
+        from PySide6.QtWidgets import QWidget
+        app()
+        parent = QWidget()
+        parent.resize(900, 700)
+        parent.show()
+        self.addCleanup(parent.deleteLater)
+        asset = {"name": "FlowBench-Setup-1.2.11.exe", "url": self.dead_url(), "size": 0, "sha256": ""}
+        opened, notes = [], []
+
+        def fake_exec(box):
+            box.show()
+            wait_for(lambda: box.browserButton.isVisible())
+            box.browserButton.click()
+            return box.result()
+
+        with mock.patch.object(updater, "downloads_dir", return_value=self.root), \
+                mock.patch.object(updater.QDesktopServices, "openUrl",
+                                  side_effect=lambda u: opened.append(u.toString()) or True), \
+                mock.patch("qfluentwidgets.InfoBar.success",
+                           side_effect=lambda title, content, **kw: notes.append(content)), \
+                mock.patch("qfluentwidgets.MessageBoxBase.exec", fake_exec):
+            ok = updater.start_self_update(parent, "v1.2.11", asset, self.PAGE)
+        self.assertFalse(ok)
+        self.assertEqual(opened, [self.PAGE])
+        self.assertEqual(len(notes), 1)
+        self.assertIn("FlowBench-Setup-1.2.11.exe", notes[0])
+
+    def test_failed_manual_check_links_to_the_release_page(self):
+        import requests
+        from PySide6.QtWidgets import QWidget
+        from qfluentwidgets import HyperlinkButton
+        app()
+        parent = QWidget()
+        parent.resize(900, 700)
+        parent.show()
+        self.addCleanup(parent.deleteLater)
+        with mock.patch.object(updater, "cleanup_downloads"), \
+                mock.patch.object(updater.requests, "get", side_effect=requests.ConnectionError("offline")):
+            updater.check_for_updates(parent, manual=True)
+            self.assertTrue(wait_for(lambda: parent.findChildren(HyperlinkButton)))
+        link = parent.findChildren(HyperlinkButton)[0]
+        self.assertEqual(link.getUrl().toString(), updater.LATEST_URL)
+
 
 if __name__ == "__main__":
     unittest.main()
