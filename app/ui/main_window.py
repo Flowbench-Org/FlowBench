@@ -81,6 +81,14 @@ class MainWindow(FluentWindow):
         # 使用 QTimer.singleShot 确保在窗口完全构建后再创建
         self._busy_overlay = None
 
+    def addSubInterface(self, interface, icon, text,
+                        position=NavigationItemPosition.TOP, *args, **kwargs):
+        item = super().addSubInterface(interface, icon, text, position, *args, **kwargs)
+        bubbles = getattr(self, "_nav_bubbles", None)
+        if bubbles is not None:
+            bubbles.attach(item)
+        return item
+
     def init_navigation(self):
         panel = getattr(self.navigationInterface, "panel", None)
         # 保留侧边栏展开/收起按钮（默认已连接 menuButton.clicked -> panel.toggle）。
@@ -89,6 +97,15 @@ class MainWindow(FluentWindow):
         if panel is not None:
             panel.setCollapsible(True)
             panel.setMenuButtonVisible(True)
+        # 侧边栏收起成图标时，鼠标移到选项上立刻弹出带尖角的名字气泡。
+        # 每个页面在 addSubInterface 里挂上，插件后来加的页面也一样。
+        self._nav_bubbles = None
+        if panel is not None and hasattr(panel, "displayModeChanged"):
+            from app.ui.nav_bubble import NavBubbles
+            self._nav_bubbles = NavBubbles(panel)
+            menu = getattr(panel, "menuButton", None)
+            if menu is not None:
+                self._nav_bubbles.attach(menu, menu.toolTip)
         # 展开/收起动画结束后重排一次，保证文字绘制宽度与面板最终宽度一致
         ani = getattr(panel, "expandAni", None) if panel is not None else None
         if ani is not None:
