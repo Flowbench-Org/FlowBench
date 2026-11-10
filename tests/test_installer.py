@@ -697,7 +697,7 @@ class UpdaterTests(unittest.TestCase):
 
     def release(self, **asset):
         base = {"name": "FlowBench-Setup-1.2.8.exe", "size": 10,
-                "browser_download_url": "https://github.com/Carlown/FlowBench/releases/download/v1.2.8/FlowBench-Setup-1.2.8.exe"}
+                "browser_download_url": "https://github.com/Flowbench-Org/FlowBench/releases/download/v1.2.8/FlowBench-Setup-1.2.8.exe"}
         base.update(asset)
         return {"tag_name": "v1.2.8", "assets": [{"name": "notes.txt"}, base]}
 
@@ -810,7 +810,7 @@ class UpdaterTests(unittest.TestCase):
 
     # -- download failures fall back to the browser ---------------------------
 
-    PAGE = "https://github.com/Carlown/FlowBench/releases/tag/v1.2.11"
+    PAGE = "https://github.com/Flowbench-Org/FlowBench/releases/tag/v1.2.11"
 
     def dead_url(self):
         import socket
@@ -995,9 +995,9 @@ class UpdaterTests(unittest.TestCase):
 
     def test_release_page_must_be_a_github_release_tag(self):
         import requests
-        for url in ("https://github.com/Carlown/FlowBench/releases",        # no release yet
-                    "https://evil.example/Carlown/FlowBench/releases/tag/v9.9.9",
-                    "http://github.com/Carlown/FlowBench/releases/tag/v9.9.9"):
+        for url in ("https://github.com/Flowbench-Org/FlowBench/releases",        # no release yet
+                    "https://evil.example/Flowbench-Org/FlowBench/releases/tag/v9.9.9",
+                    "http://github.com/Flowbench-Org/FlowBench/releases/tag/v9.9.9"):
             with self.subTest(url=url):
                 error = requests.HTTPError("403 rate limit")
                 with self.assertRaises(requests.HTTPError):      # the API's own error

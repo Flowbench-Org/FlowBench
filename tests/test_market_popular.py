@@ -154,7 +154,7 @@ class DownloadSourceTests(unittest.TestCase):
         self.assertEqual(market.plugin_download_urls("japanese.py"),
                          [market.CDN_PLUGIN_BASE + "japanese.py",
                           market.RAW_PLUGIN_BASE + "japanese.py"])
-        self.assertTrue(market.CDN_PLUGIN_BASE.startswith("https://cdn.jsdelivr.net/gh/Carlown/FlowBench@"))
+        self.assertTrue(market.CDN_PLUGIN_BASE.startswith("https://cdn.jsdelivr.net/gh/Flowbench-Org/FlowBench@"))
         self.assertEqual(market.plugin_download_urls("https://example.com/p.py"),
                          ["https://example.com/p.py"])
 
