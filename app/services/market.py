@@ -24,14 +24,16 @@ from app.services.logger import log
 from app.services.plugins import plugins_dir
 from app.services.updater import _ver_tuple
 
+# The project repository (moved from Carlown/FlowBench to the organization).
+_REPO = "Flowbench-Org/FlowBench"
+_BRANCH = "master"
+
 INDEX_SOURCES = [
     # GitHub Contents API：内容实时（无 CDN 缓存延迟），匿名限额 60 次/小时，够日常刷新
-    ("https://api.github.com/repos/Carlown/FlowBench/contents/marketplace/plugins-index.json?ref=master", "api"),
+    (f"https://api.github.com/repos/{_REPO}/contents/marketplace/plugins-index.json?ref={_BRANCH}", "api"),
     # raw 直链兜底（可能有几分钟 CDN 延迟，但无限额）
-    ("https://raw.githubusercontent.com/Carlown/FlowBench/master/marketplace/plugins-index.json", "raw"),
+    (f"https://raw.githubusercontent.com/{_REPO}/{_BRANCH}/marketplace/plugins-index.json", "raw"),
 ]
-_REPO = "Carlown/FlowBench"
-_BRANCH = "master"
 # Repository-hosted plugin files. jsDelivr comes first because its public
 # download statistics are the install counts behind the popular searches.
 CDN_PLUGIN_BASE = f"https://cdn.jsdelivr.net/gh/{_REPO}@{_BRANCH}/marketplace/"
@@ -43,7 +45,7 @@ _STATS_MAX_VERSIONS = 10
 _STATS_VERSION_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$")
 
 # 索引在线编辑入口（发布插件用）
-INDEX_EDIT_URL = "https://github.com/Carlown/FlowBench/edit/master/marketplace/plugins-index.json"
+INDEX_EDIT_URL = f"https://github.com/{_REPO}/edit/{_BRANCH}/marketplace/plugins-index.json"
 
 # 浏览器一键授权（Device Flow）用的 OAuth App Client ID。
 # 项目维护者在 GitHub → Settings → Developer settings → OAuth Apps 注册一次，

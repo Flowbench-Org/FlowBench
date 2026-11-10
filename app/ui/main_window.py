@@ -25,6 +25,10 @@ from app.ui.market_view import MarketView
 from app.ui.monitor_view import MonitorView
 from app.ui.settings_view import SettingsView
 from app.ui.stress_view import StressView
+from app.ui import info_bar_fit
+
+# Every InfoBar wraps by pixel width, so long messages stay inside the window.
+info_bar_fit.install()
 
 MON_ICON = getattr(FIF, "DIAGNOSTICS", getattr(FIF, "HEART", FIF.DEVELOPER_TOOLS))
 PLUGIN_ICON = getattr(FIF, "APPLICATION", FIF.DEVELOPER_TOOLS)

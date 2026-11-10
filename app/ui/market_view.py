@@ -173,8 +173,13 @@ def _solid_heart_icon(color="#E81123") -> QIcon:
     return QIcon(pixmap)
 
 # GitHub 一键发布相关常量
-_REPO_OWNER = "Carlown"
+_REPO_OWNER = "Flowbench-Org"
 _REPO_NAME = "FlowBench"
+_REPO_HOMEPAGE = f"https://github.com/{_REPO_OWNER}/{_REPO_NAME}"
+# The GitHub account that publishes the official plugins (a person, so it did
+# not change when the repository moved to the organization).
+_OFFICIAL_PUBLISHER = "Carlown"
+_OFFICIAL_HOMEPAGES = (f"https://github.com/{_REPO_OWNER}/", "https://github.com/Carlown/")
 _REPO_BRANCH = "master"
 _MARKET_DIR = "marketplace"
 _GH_API = "https://api.github.com"
@@ -1167,9 +1172,8 @@ class PluginMarketPage(QWidget):
         """给旧版官方索引补齐发布者字段，保证离线缓存也能识别作者。"""
         if (not entry.get("publisher")
                 and str(entry.get("author", "")).strip() == "FlowBench"
-                and str(entry.get("homepage", "")).startswith(
-                    f"https://github.com/{_REPO_OWNER}/")):
-            entry["publisher"] = _REPO_OWNER
+                and str(entry.get("homepage", "")).startswith(_OFFICIAL_HOMEPAGES)):
+            entry["publisher"] = _OFFICIAL_PUBLISHER
         return entry
 
     def _load(self):
@@ -2472,7 +2476,7 @@ class PublishDialog(MessageBoxBase):
             "file": f"{rec.pid}.py",
             "sha256": digest,
             "min_app": "1.0.7",
-            "homepage": "https://github.com/Carlown/FlowBench",
+            "homepage": _REPO_HOMEPAGE,
         }
         if self._icon_data_uri:
             entry["icon"] = self._icon_data_uri

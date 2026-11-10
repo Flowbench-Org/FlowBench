@@ -76,6 +76,9 @@ _RESOURCES = [
     ('テストを実行中です', '测试正在进行', 'A test is running'),
     ('今すぐ更新すると実行中のテストが停止します。今すぐ更新しますか？\n「後で」を選ぶとインストーラーは保持され、次回は再ダウンロード不要です。', '现在更新会停止当前测试。要立即更新吗？\n选“稍后”的话，安装包会保留，下次更新不用重新下载。', 'Updating now stops the running test. Update now?\nIf you choose Later, the download is kept for next time.'),
     ('更新の確認に失敗しました', '检查更新失败', 'Update check failed'),
+    ('GitHub が一時的にリクエスト数を制限しています。しばらくしてから再試行するか、リリースページを開いてください。', 'GitHub 暂时限制了查询次数，请过一会儿再试，或者打开发布页查看。', 'GitHub is limiting requests for now. Try again later, or open the release page.'),
+    ('GitHub に接続できません。ネットワークまたはプロキシの設定を確認してください。', '连不上 GitHub，请检查网络或代理设置。', 'Could not reach GitHub. Check your network or proxy settings.'),
+    ('GitHub から予期しない応答がありました。しばらくしてから再試行してください。', 'GitHub 返回了意外的结果，请稍后再试。', 'GitHub sent an unexpected reply. Try again later.'),
     ('GitHub に接続できません：{#0}', '无法连接 GitHub：{#0}', 'Cannot reach GitHub: {#0}'),
     ('最新バージョンです', '已是最新版本', 'Up to date'),
     ('最新バージョン（v{#0}）を使用しています。', '当前版本 v{#0}，与 GitHub 最新版本一致。', 'You are on the latest version (v{#0}).'),
@@ -1038,7 +1041,7 @@ def uninstall():
 class Plugin(FlowBenchPlugin):
     name = ("日语语言包", "Japanese Language Pack")
     title = "日本語言語パック"
-    version = "1.0.5"
+    version = "1.0.6"
     author = "FlowBench"
     description = (
         "将 FlowBench 1.2.10 的界面、对话框和动态提示转换为日语，兼容深浅色主题；启用即生效。",

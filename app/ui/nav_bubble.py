@@ -6,7 +6,7 @@ from typing import Callable, Optional
 
 from PySide6.QtCore import (QEasingCurve, QEvent, QObject, QPoint, QPointF,
                             QPropertyAnimation, QRectF, QSize, Qt, QTimer)
-from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QPainterPathStroker
+from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath
 from PySide6.QtWidgets import QApplication, QWidget
 from qfluentwidgets import NavigationDisplayMode, isDarkTheme, setFont
 from qfluentwidgets.components.widgets.tool_tip import ToolTipFilter
@@ -16,7 +16,7 @@ TAIL_H = 12
 RADIUS = 6
 PAD_X = 12
 PAD_Y = 7
-SHADOW = 6          # room around the bubble for its soft shadow
+MARGIN = 1          # keeps the antialiased border inside the window; no shadow
 GAP = 4             # between the sidebar item and the pointer's tip
 FADE_MS = 120
 SWITCH_MS = 90      # moving to the next item within this keeps the bubble up
@@ -49,7 +49,7 @@ class NavTipBubble(QWidget):
 
     def tip_offset(self) -> QPoint:
         """Where the pointer's tip is, in the bubble's own coordinates."""
-        return QPoint(SHADOW, self.height() // 2)
+        return QPoint(MARGIN, self.height() // 2)
 
     def show_for(self, target: QWidget, text: str):
         """Point at ``target`` with ``text``; slides along when already shown."""
@@ -57,7 +57,7 @@ class NavTipBubble(QWidget):
         self.target = target
         self._text = text
         bubble = self._bubble_size()
-        self.resize(bubble.width() + 2 * SHADOW, bubble.height() + 2 * SHADOW)
+        self.resize(bubble.width() + 2 * MARGIN, bubble.height() + 2 * MARGIN)
         tip = target.mapToGlobal(QPoint(target.width() + GAP, target.height() // 2))
         pos = tip - self.tip_offset()
         screen = target.screen()
@@ -81,8 +81,8 @@ class NavTipBubble(QWidget):
         self.hide()
 
     def _body_rect(self) -> QRectF:
-        return QRectF(SHADOW + TAIL_W, SHADOW,
-                      self.width() - 2 * SHADOW - TAIL_W, self.height() - 2 * SHADOW)
+        return QRectF(MARGIN + TAIL_W, MARGIN,
+                      self.width() - 2 * MARGIN - TAIL_W, self.height() - 2 * MARGIN)
 
     def bubble_path(self) -> QPainterPath:
         """The rounded box and its pointer as one outline, in local coordinates."""
@@ -91,7 +91,7 @@ class NavTipBubble(QWidget):
         body.addRoundedRect(rect, RADIUS, RADIUS)
         mid = self.height() / 2
         tail = QPainterPath()
-        tail.moveTo(QPointF(SHADOW, mid))
+        tail.moveTo(QPointF(MARGIN, mid))
         tail.lineTo(QPointF(rect.left() + 1, mid - TAIL_H / 2))
         tail.lineTo(QPointF(rect.left() + 1, mid + TAIL_H / 2))
         tail.closeSubpath()
@@ -106,15 +106,6 @@ class NavTipBubble(QWidget):
         path = self.bubble_path()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(Qt.NoPen)
-        # Soft shadow: stacked halos, densest right at the edge.
-        layer = QColor(0, 0, 0, 9 if dark else 5)
-        stroker = QPainterPathStroker()
-        stroker.setJoinStyle(Qt.RoundJoin)
-        for grow in range(SHADOW, 0, -1):
-            stroker.setWidth(grow * 2)
-            painter.setBrush(layer)
-            painter.drawPath(stroker.createStroke(path).united(path).translated(0, 1))
         painter.setBrush(fill)
         painter.setPen(border)
         painter.drawPath(path)

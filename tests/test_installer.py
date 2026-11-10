@@ -697,7 +697,7 @@ class UpdaterTests(unittest.TestCase):
 
     def release(self, **asset):
         base = {"name": "FlowBench-Setup-1.2.8.exe", "size": 10,
-                "browser_download_url": "https://github.com/Carlown/FlowBench/releases/download/v1.2.8/FlowBench-Setup-1.2.8.exe"}
+                "browser_download_url": "https://github.com/Flowbench-Org/FlowBench/releases/download/v1.2.8/FlowBench-Setup-1.2.8.exe"}
         base.update(asset)
         return {"tag_name": "v1.2.8", "assets": [{"name": "notes.txt"}, base]}
 
@@ -810,7 +810,7 @@ class UpdaterTests(unittest.TestCase):
 
     # -- download failures fall back to the browser ---------------------------
 
-    PAGE = "https://github.com/Carlown/FlowBench/releases/tag/v1.2.11"
+    PAGE = "https://github.com/Flowbench-Org/FlowBench/releases/tag/v1.2.11"
 
     def dead_url(self):
         import socket
@@ -918,19 +918,110 @@ class UpdaterTests(unittest.TestCase):
     def test_failed_manual_check_links_to_the_release_page(self):
         import requests
         from PySide6.QtWidgets import QWidget
-        from qfluentwidgets import HyperlinkButton
+        from qfluentwidgets import HyperlinkButton, InfoBar
+        from app.ui.i18n import L
         app()
         parent = QWidget()
-        parent.resize(900, 700)
+        parent.resize(620, 500)          # as narrow as the report's screenshot
         parent.show()
         self.addCleanup(parent.deleteLater)
+        limited = requests.Response()
+        limited.status_code = 403
+        limited.headers["X-RateLimit-Remaining"] = "0"
+        error = requests.HTTPError("403 Client Error: rate limit exceeded for url: "
+                                   + updater._API_URL, response=limited)
         with mock.patch.object(updater, "cleanup_downloads"), \
-                mock.patch.object(updater.requests, "get", side_effect=requests.ConnectionError("offline")):
+                mock.patch.object(updater.requests, "get", side_effect=error), \
+                mock.patch.object(updater.requests, "head",
+                                  side_effect=requests.ConnectionError("offline")):
             updater.check_for_updates(parent, manual=True)
             self.assertTrue(wait_for(lambda: parent.findChildren(HyperlinkButton)))
+        QTest.qWait(600)                 # let the bar slide into place
         link = parent.findChildren(HyperlinkButton)[0]
         self.assertEqual(link.getUrl().toString(), updater.LATEST_URL)
+        bar = next(b for b in parent.findChildren(InfoBar) if link in b.findChildren(HyperlinkButton))
+        self.assertEqual(bar.content, L("GitHub 暂时限制了查询次数，请过一会儿再试，或者打开发布页查看。",
+                                        "GitHub is limiting requests for now. Try again later, "
+                                        "or open the release page."))
+        self.assertIn("rate limit exceeded", bar.toolTip())   # raw error kept
+        # The whole bar, its link and its close button stay inside the window.
+        self.assertTrue(parent.rect().contains(bar.geometry()), bar.geometry())
+        close = bar.closeButton.geometry().translated(bar.pos())
+        self.assertTrue(bar.closeButton.isVisible())
+        self.assertTrue(parent.rect().contains(close), close)
 
+    # -- when the API is out of requests --------------------------------------
+
+    class _Http:
+        def __init__(self, api=None, page_url=None, page_error=None):
+            self.api, self.page_url, self.page_error = api, page_url, page_error
+            self.calls = []
+
+        def get(self, url, **kwargs):
+            self.calls.append(("get", url))
+            if isinstance(self.api, Exception):
+                raise self.api
+            response = mock.Mock()
+            response.raise_for_status.return_value = None
+            response.json.return_value = self.api
+            return response
+
+        def head(self, url, **kwargs):
+            self.calls.append(("head", url, kwargs.get("allow_redirects")))
+            if self.page_error:
+                raise self.page_error
+            response = mock.Mock()
+            response.raise_for_status.return_value = None
+            response.url = self.page_url
+            return response
+
+    def test_api_answer_is_used_when_it_works(self):
+        release = self.release()
+        http = self._Http(api=dict(release, html_url="https://github.com/x/y/releases/tag/v1.2.8"))
+        result = updater.fetch_latest_release(http)
+        self.assertEqual((result["tag"], result["asset"]["name"]), ("v1.2.8", "FlowBench-Setup-1.2.8.exe"))
+        self.assertEqual([c[0] for c in http.calls], ["get"])
+
+    def test_release_page_answers_when_the_api_is_limited(self):
+        import requests
+        http = self._Http(api=requests.HTTPError("403 rate limit"),
+                          page_url="https://github.com/Flowbench-Org/FlowBench/releases/tag/v99.0.1")
+        result = updater.fetch_latest_release(http)
+        self.assertEqual(result["tag"], "v99.0.1")
+        self.assertTrue(result["newer"])
+        self.assertIsNone(result["asset"])              # no installer details: browser update
+        self.assertFalse(updater.can_self_update(result))
+        self.assertEqual(http.calls[-1], ("head", updater.LATEST_URL, True))
+
+    def test_release_page_must_be_a_github_release_tag(self):
+        import requests
+        for url in ("https://github.com/Flowbench-Org/FlowBench/releases",        # no release yet
+                    "https://evil.example/Flowbench-Org/FlowBench/releases/tag/v9.9.9",
+                    "http://github.com/Flowbench-Org/FlowBench/releases/tag/v9.9.9"):
+            with self.subTest(url=url):
+                error = requests.HTTPError("403 rate limit")
+                with self.assertRaises(requests.HTTPError):      # the API's own error
+                    updater.fetch_latest_release(self._Http(api=error, page_url=url))
+
+    def test_check_errors_are_sorted_for_the_message(self):
+        import requests
+
+        def http_error(status, remaining="", text="error"):
+            response = requests.Response()
+            response.status_code = status
+            if remaining:
+                response.headers["X-RateLimit-Remaining"] = remaining
+            return requests.HTTPError(text, response=response)
+
+        for exc, kind in ((http_error(403, "0"), "rate_limit"),
+                          (http_error(429, text="429 rate limit exceeded"), "rate_limit"),
+                          (http_error(403, "12"), "other"),
+                          (http_error(500), "other"),
+                          (requests.ConnectionError("offline"), "network"),
+                          (requests.Timeout("slow"), "network"),
+                          (ValueError("bad json"), "other")):
+            with self.subTest(exc=str(exc)):
+                self.assertEqual(updater.check_error_kind(exc), kind)
 
 if __name__ == "__main__":
     unittest.main()

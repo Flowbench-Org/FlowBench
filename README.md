@@ -55,7 +55,7 @@ Check the built-in `example_hello.py` / `example_dns.py` plugins in the plugin f
 
 ### Install (End Users)
 
-1. Go to the [**Releases**](https://github.com/Carlown/FlowBench/releases/latest) page
+1. Go to the [**Releases**](https://github.com/Flowbench-Org/FlowBench/releases/latest) page
 2. Download the latest `FlowBench-Setup-x.x.x.exe`
 3. Run the installer and follow the wizard (desktop shortcut optional). It installs for the
    current user in `%LOCALAPPDATA%\Programs\FlowBench` without administrator rights, and removes
@@ -73,7 +73,7 @@ and theme. Settings, plugins and logs in `%APPDATA%\FlowBench` are kept unless y
 ### Run from Source (Developers)
 
 ```bash
-git clone https://github.com/Carlown/FlowBench.git
+git clone https://github.com/Flowbench-Org/FlowBench.git
 cd FlowBenchPy
 pip install -r requirements.txt
 python main.py
@@ -164,7 +164,7 @@ FlowBench v1.1.0 内置完整插件平台，可以自由扩展功能：
 
 ### 安装（普通用户）
 
-1. 进入 [**Releases**](https://github.com/Carlown/FlowBench/releases/latest) 发布页
+1. 进入 [**Releases**](https://github.com/Flowbench-Org/FlowBench/releases/latest) 发布页
 2. 下载最新的 `FlowBench-Setup-x.x.x.exe`
 3. 双击运行，按向导完成安装（可勾选桌面快捷方式）。默认为当前用户安装到
    `%LOCALAPPDATA%\Programs\FlowBench`，不需要管理员权限；检测到旧版（1.2.7 及以前的
@@ -180,7 +180,7 @@ FlowBench v1.1.0 内置完整插件平台，可以自由扩展功能：
 ### 从源码运行（开发者）
 
 ```bash
-git clone https://github.com/Carlown/FlowBench.git
+git clone https://github.com/Flowbench-Org/FlowBench.git
 cd FlowBenchPy
 pip install -r requirements.txt
 python main.py
