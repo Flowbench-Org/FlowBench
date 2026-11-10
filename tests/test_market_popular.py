@@ -245,11 +245,15 @@ class PopularSearchPanelTests(unittest.TestCase):
         self.page._on_index(self.entries, False)
         self.page._commit_search("dns")
         self.page._show_search_suggestions()
-        QTest.qWait(400)
+        panel = self.page.searchSuggestPanel
+        opened = lambda: panel.height() >= panel.sizeHint().height()
+        for _ in range(150):              # the slide-down animation, up to 3 s
+            if opened():
+                break
+            QTest.qWait(20)
         self.assertTrue(self.page.hotHost.isVisible())
         self.assertTrue(self.page.historyHost.isVisible())
-        self.assertGreaterEqual(self.page.searchSuggestPanel.height(),
-                                self.page.searchSuggestPanel.sizeHint().height())
+        self.assertTrue(opened(), (panel.height(), panel.sizeHint().height()))
 
     def test_clicking_a_popular_search_finds_that_plugin(self):
         self.page._on_index(self.entries, False)

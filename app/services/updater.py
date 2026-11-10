@@ -12,7 +12,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import requests
 from PySide6.QtCore import QObject, QUrl, Signal
@@ -216,6 +216,72 @@ def is_newer(latest: str, current: str = APP_VERSION) -> bool:
         return False
 
 
+_TAG_PAGE_RE = re.compile(r"^/[^/]+/[^/]+/releases/tag/([^/?#]+)$")
+
+
+def latest_tag_from_page(http=requests):
+    """The newest release's tag, read from where ``/releases/latest`` leads.
+
+    This page is not counted against the GitHub API's limit of 60 requests an
+    hour, but it lists no installer details.
+    """
+    r = http.head(LATEST_URL, allow_redirects=True, timeout=8,
+                  headers={"User-Agent": "FlowBench"})
+    r.raise_for_status()
+    final = urlparse(str(r.url))
+    match = _TAG_PAGE_RE.match(final.path)
+    if final.scheme != "https" or final.hostname != "github.com" or not match:
+        raise ValueError("no published release")
+    return unquote(match.group(1)), str(r.url)
+
+
+def fetch_latest_release(http=requests) -> dict:
+    """Check GitHub for the newest release.
+
+    The API gives the installer for an in-app update. When it fails, for
+    example once its hourly limit is used up, the release page still tells
+    which version is newest; the update then opens that page in the browser.
+    """
+    try:
+        r = http.get(_API_URL, timeout=8, headers={"Accept": "application/vnd.github+json"})
+        r.raise_for_status()
+        d = r.json()
+        tag = str(d.get("tag_name", ""))
+        return {"ok": True, "tag": tag, "url": d.get("html_url") or LATEST_URL,
+                "newer": is_newer(tag), "asset": pick_setup_asset(d)}
+    except Exception as api_error:
+        try:
+            tag, url = latest_tag_from_page(http)
+        except Exception:
+            raise api_error
+        return {"ok": True, "tag": tag, "url": url, "newer": is_newer(tag), "asset": None}
+
+
+def check_error_kind(exc: BaseException) -> str:
+    """Sort a failed update check: rate_limit, network or other."""
+    if isinstance(exc, requests.HTTPError):
+        resp = exc.response
+        if resp is not None and resp.status_code in (403, 429):
+            remaining = str(resp.headers.get("X-RateLimit-Remaining", ""))
+            if remaining == "0" or "rate limit" in str(exc).lower():
+                return "rate_limit"
+        return "other"
+    if isinstance(exc, requests.RequestException):
+        return "network"
+    return "other"
+
+
+def _check_failure_text(kind: str, L) -> str:
+    if kind == "rate_limit":
+        return L("GitHub 暂时限制了查询次数，请过一会儿再试，或者打开发布页查看。",
+                 "GitHub is limiting requests for now. Try again later, or open the release page.")
+    if kind == "network":
+        return L("连不上 GitHub，请检查网络或代理设置。",
+                 "Could not reach GitHub. Check your network or proxy settings.")
+    return L("GitHub 返回了意外的结果，请稍后再试。",
+             "GitHub sent an unexpected reply. Try again later.")
+
+
 class _Checker(QObject):
     done = Signal(dict)
 
@@ -225,17 +291,9 @@ class _Checker(QObject):
     def _work(self):
         cleanup_downloads()
         try:
-            r = requests.get(_API_URL, timeout=8,
-                             headers={"Accept": "application/vnd.github+json"})
-            r.raise_for_status()
-            d = r.json()
-            tag = str(d.get("tag_name", ""))
-            self.done.emit({"ok": True, "tag": tag,
-                            "url": d.get("html_url") or LATEST_URL,
-                            "newer": is_newer(tag),
-                            "asset": pick_setup_asset(d)})
+            self.done.emit(fetch_latest_release())
         except Exception as e:
-            self.done.emit({"ok": False, "error": str(e)})
+            self.done.emit({"ok": False, "error": str(e), "kind": check_error_kind(e)})
 
 
 def check_for_updates(parent=None, manual: bool = False, on_finished=None):
@@ -269,13 +327,7 @@ def check_for_updates(parent=None, manual: bool = False, on_finished=None):
             try:
                 if not d.get("ok"):
                     if manual:
-                        from qfluentwidgets import HyperlinkButton, InfoBar
-                        bar = InfoBar.error(L("检查更新失败", "Update check failed"),
-                                            L(f"无法连接 GitHub：{d.get('error', '')}",
-                                              f"Cannot reach GitHub: {d.get('error', '')}"),
-                                            parent=parent, duration=8000)
-                        # The browser may get through where the app cannot (proxy, VPN).
-                        bar.addWidget(HyperlinkButton(LATEST_URL, L("打开发布页", "Open release page"), bar))
+                        _show_check_failure(parent, d, L)
                 elif d.get("newer"):
                     # 自动检查时，如果该版本已被用户跳过，不再弹窗
                     if not manual and settings.skip_version == d["tag"]:
@@ -300,6 +352,23 @@ def check_for_updates(parent=None, manual: bool = False, on_finished=None):
 
     c.done.connect(on_done)
     c.go()
+
+
+def _show_check_failure(parent, result, L):
+    """A short reason plus a link to the release page; the raw error is the tooltip."""
+    from PySide6.QtCore import Qt
+    from qfluentwidgets import HyperlinkButton, InfoBar, InfoBarIcon, InfoBarPosition
+    from app.ui import info_bar_fit
+    info_bar_fit.install()
+    bar = InfoBar(InfoBarIcon.ERROR, L("检查更新失败", "Update check failed"),
+                  _check_failure_text(result.get("kind", "other"), L),
+                  Qt.Horizontal, True, 8000, InfoBarPosition.TOP_RIGHT, parent)
+    bar.setToolTip(str(result.get("error", "")))
+    # The browser may get through where the app cannot (proxy, VPN), and the
+    # link must be in place before the bar is shown and positioned.
+    bar.addWidget(HyperlinkButton(LATEST_URL, L("打开发布页", "Open release page"), bar))
+    bar.show()
+    return bar
 
 
 def _show_update_dialog(parent, tag, url, L, info=None):
