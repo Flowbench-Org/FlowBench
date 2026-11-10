@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.11] - 2026-11-10
 
 ### Changed
 
@@ -8,6 +8,12 @@
 - If the browser cannot be opened, the dialog shows the release page address instead of closing.
 - A failed manual **Check for Updates** now has an **Open release page** link, since a browser may get through where the app cannot (for example behind a proxy).
 - Japanese language pack 1.0.4 translates the new messages.
+
+### Verified
+
+- Checked the failed-download dialog in Chinese light, Chinese dark, English and Japanese: three equal-width buttons, and the installer name on its own line.
+- Covered error sorting, Retry, opening the release page, a browser that will not open, the full Update now fallback and the failed manual check link with automated tests.
+- Passed the full automated test suite (138 tests, 1688 subtests).
 
 ## [1.2.10] - 2026-11-04
 
