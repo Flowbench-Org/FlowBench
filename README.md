@@ -233,3 +233,9 @@ MIT License
 ## Server Agent (additive)
 
 如果需要让服务器作为独立节点上线，而不是把桌面 GUI 搬到服务器，请看 [`SERVER_AGENT.md`](SERVER_AGENT.md)。它新增了跨平台 headless Agent、Hub、控制 CLI 和打包脚本；现有 GUI 与原功能保持不变。
+
+## ☕ Support My Work
+
+If you find my projects useful, consider supporting me!
+
+[![Crypto Support](https://img.shields.io/badge/☕_Crypto_Support-Support_Me-FFDD00?style=for-the-badge)](https://noteller.com/carlown)
