@@ -372,6 +372,10 @@ _RESOURCES = [
     ('プラグインを公開…', '发布插件…', 'Publish a Plugin…'),
     ('更新', '刷新', 'Refresh'),
     ('人気の検索', '热门搜索', 'Popular searches'),
+    ('直近 30 日のインストール数順', '按近 30 天安装次数', 'By installs in the last 30 days'),
+    ('インストール統計はまだありません。新しい順に表示しています', '暂无安装统计，按上架时间排列', 'No install stats yet; newest first'),
+    ('1 回インストール', '1 次安装', '1 install'),
+    ('{#0} 回インストール', '{#0} 次安装', '{#0} installs'),
     ('検索履歴', '搜索历史', 'Search history'),
     ('すべてクリア', '全部清空', 'Clear all'),
     ('検索履歴をすべて削除', '清空全部搜索历史', 'Clear all search history'),
@@ -1034,7 +1038,7 @@ def uninstall():
 class Plugin(FlowBenchPlugin):
     name = ("日语语言包", "Japanese Language Pack")
     title = "日本語言語パック"
-    version = "1.0.4"
+    version = "1.0.5"
     author = "FlowBench"
     description = (
         "将 FlowBench 1.2.10 的界面、对话框和动态提示转换为日语，兼容深浅色主题；启用即生效。",

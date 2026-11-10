@@ -269,15 +269,15 @@ class MainWindow(FluentWindow):
         menu.popup(QPoint(x, y))
 
     def _show_from_tray(self):
-        """从托盘/最小化状态恢复显示窗口。"""
+        """从托盘或最小化恢复窗口并放到最前面：页面不变，最大化的仍是最大化。"""
+        # Clearing only the minimized flag keeps a maximized window maximized;
+        # showNormal() used to shrink it back to its normal size.
+        state = (self.windowState() & ~Qt.WindowMinimized) | Qt.WindowActive
         if not self.isVisible():
             self.show()
-        if self.isMinimized():
-            self.showNormal()
-        self.setWindowState(self.windowState() & ~Qt.WindowMinimized | Qt.WindowActive)
-        self.activateWindow()
+        self.setWindowState(state)
         self.raise_()
-        self.show()
+        self.activateWindow()
 
     def _quit_app(self):
         """从托盘退出应用。"""
