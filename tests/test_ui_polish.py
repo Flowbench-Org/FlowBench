@@ -284,11 +284,20 @@ class ChartZoomTests(unittest.TestCase):
         self.assertFalse(self.chart.is_zoomed())
 
     def test_wheel_zooms_one_step_around_the_cursor_with_animation(self):
+        from app.ui.charts import ZOOM_MS
         self.assertTrue(self.wheel(0.75, 1))
-        self.wait(40)
+        # Animated, not a jump. Checked without a fixed sleep, which a busy
+        # machine can overrun before the first frame is drawn.
+        ani = self.chart._zoom_ani
+        self.assertEqual(ani.state(), QAbstractAnimation.State.Running)
+        self.assertEqual(ani.duration(), ZOOM_MS)
         x0, x1 = self.chart.visible_range()
-        self.assertTrue(0.0 < x0 < 9.0 and 48.0 < x1 < 60.0, (x0, x1))   # still moving
-        self.wait(400)
+        self.assertGreater(x1 - x0, 48.5, (x0, x1))           # not at the target yet
+        for _ in range(250):                                  # up to 5 s
+            if ani.state() == QAbstractAnimation.State.Stopped:
+                break
+            self.wait(20)
+        self.assertEqual(ani.state(), QAbstractAnimation.State.Stopped)
         x0, x1 = self.chart.visible_range()
         self.assertAlmostEqual(x1 - x0, 48.0, places=3)      # one notch = 80 %
         self.assertAlmostEqual(x0, 9.0, delta=0.05)          # 45 stays under the cursor
