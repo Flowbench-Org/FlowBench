@@ -141,6 +141,14 @@ class NavBubbleTests(unittest.TestCase):
         center = QPoint(self.bubble.width() // 2 + nav_bubble.TAIL_W, 9)
         self.assertGreater(light.pixelColor(center).lightness(), 200)
         self.assertLess(dark.pixelColor(center).lightness(), 90)
+        # No shadow: no room is left around the outline, and outside the
+        # rounded corners the window stays fully transparent.
+        body = self.bubble._body_rect()
+        self.assertEqual(self.bubble.height() - body.height(), 2 * nav_bubble.MARGIN)
+        for image in (light, dark):
+            w, h = image.width(), image.height()
+            for point in (QPoint(0, 0), QPoint(w - 1, 0), QPoint(0, h - 1), QPoint(w - 1, h - 1)):
+                self.assertEqual(image.pixelColor(point).alpha(), 0, point)
 
 
 if __name__ == "__main__":
