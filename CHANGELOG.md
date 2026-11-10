@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Opening FlowBench again while it is already running (double-clicking the icon, the Start menu, a shortcut) no longer flashes the splash screen. The new launch asks the running copy to bring its window back, on the page it was showing, and exits. The running copy is allowed to come to the front instead of only flashing its taskbar button, and a maximized window comes back maximized instead of at its normal size.
+- Popular searches on the Plugins page now rank plugins by real installs over the last 30 days, with the count next to each one; they used to be just the newest plugins. Plugins in the FlowBench repository now download through jsDelivr, the public CDN for GitHub files, whose public download statistics are where the counts come from. GitHub is still the fallback: when jsDelivr is unreachable or still serves an older copy of a plugin, the download comes from GitHub instead and jsDelivr is asked to refresh its copy. Every download is still checked against the SHA-256 in the index.
+- The counts are fetched in the background and kept for six hours. Until any plugin has been installed through jsDelivr, the list says "No install stats yet; newest first" and falls back to the newest plugins.
+- Popular searches stay visible next to the search history; they used to disappear after the first search. Plugins that cannot be shown because they need a newer FlowBench are left out, since searching for them found nothing.
+- The search suggestions panel is fully opaque, so the plugin cards underneath no longer show through it.
+- Japanese language pack 1.0.5 translates the new messages.
+
 ## [1.2.11] - 2026-11-10
 
 ### Changed
