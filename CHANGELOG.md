@@ -8,7 +8,8 @@
 - Messages at the top of the window (InfoBars) now wrap by their real width, breaking long web addresses after a "/", so a long message no longer runs past the window edge and hides its close button. qfluentwidgets wrapped them by character count, which is about twice too wide for Chinese and cannot break an address.
 - A failed **Check for Updates** says why in a short sentence (GitHub is limiting requests, no connection, or an unexpected reply) instead of the raw error with its URL, which is kept in the tooltip. The **Open release page** link is part of the message from the start, so the message is sized and placed with it.
 - When the GitHub API has used up its hourly limit of 60 requests, the update check reads the newest version from the release page instead, so it still finds a new version; the update then opens the release page in the browser, because only the API lists the installer.
-- Japanese language pack 1.0.6 translates the new messages.
+- When popular searches have no install counts yet, the panel now says that jsDelivr's statistics lag about two days instead of just "No install stats yet", which looked broken right after installing a plugin; the tooltip explains where the counts come from. jsDelivr's public data was two days behind when checked.
+- Japanese language pack 1.0.7 translates the new messages.
 - The project moved from `Carlown/FlowBench` to `Flowbench-Org/FlowBench`. The update check, the plugin index and plugin downloads (GitHub and jsDelivr), install statistics, publishing and unpublishing, the plugin index's homepages and the README links now use the new address directly instead of relying on GitHub's redirect from the old one. The official plugins are still published by the `Carlown` account, including entries from an older offline copy of the index.
 
 ## [1.2.12] - 2026-11-10

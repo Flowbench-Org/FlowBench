@@ -376,7 +376,8 @@ _RESOURCES = [
     ('更新', '刷新', 'Refresh'),
     ('人気の検索', '热门搜索', 'Popular searches'),
     ('直近 30 日のインストール数順', '按近 30 天安装次数', 'By installs in the last 30 days'),
-    ('インストール統計はまだありません。新しい順に表示しています', '暂无安装统计，按上架时间排列', 'No install stats yet; newest first'),
+    ('インストール統計は約 2 日遅れで反映されます。いまは新しい順に表示しています', '安装统计约有两天延迟，暂按上架时间排列', 'Install stats lag about two days; newest first for now'),
+    ('インストール数は jsDelivr の公開ダウンロード統計によるもので、1 日 1 回更新されます。新しいインストールが反映されるまで約 2 日かかります。', '安装次数来自 jsDelivr 的公开下载统计，每天更新一次，新的安装大约两天后才会算进来。', "Install counts come from jsDelivr's public download statistics, which update daily; a new install shows up after about two days."),
     ('1 回インストール', '1 次安装', '1 install'),
     ('{#0} 回インストール', '{#0} 次安装', '{#0} installs'),
     ('検索履歴', '搜索历史', 'Search history'),
@@ -1041,7 +1042,7 @@ def uninstall():
 class Plugin(FlowBenchPlugin):
     name = ("日语语言包", "Japanese Language Pack")
     title = "日本語言語パック"
-    version = "1.0.6"
+    version = "1.0.7"
     author = "FlowBench"
     description = (
         "将 FlowBench 1.2.10 的界面、对话框和动态提示转换为日语，兼容深浅色主题；启用即生效。",

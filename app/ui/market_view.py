@@ -1508,9 +1508,16 @@ class PluginMarketPage(QWidget):
     def _refresh_search_suggestions(self):
         """刷新热门词和历史列表，不重建控件以避免界面闪动。"""
         any_counts = any(count > 0 for _term, count in self._hot_searches)
+        # jsDelivr publishes its statistics about two days late, so a fresh
+        # install is not counted at once; say so rather than look broken.
         self.hotNote.setText(
             L("按近 30 天安装次数", "By installs in the last 30 days") if any_counts
-            else L("暂无安装统计，按上架时间排列", "No install stats yet; newest first"))
+            else L("安装统计约有两天延迟，暂按上架时间排列",
+                   "Install stats lag about two days; newest first for now"))
+        self.hotNote.setToolTip(
+            L("安装次数来自 jsDelivr 的公开下载统计，每天更新一次，新的安装大约两天后才会算进来。",
+              "Install counts come from jsDelivr's public download statistics, which update "
+              "daily; a new install shows up after about two days."))
         for i, (btn, _rank_label, term_label, count_label) in enumerate(self._hot_buttons):
             visible = i < len(self._hot_searches)
             term, count = self._hot_searches[i] if visible else ("", 0)

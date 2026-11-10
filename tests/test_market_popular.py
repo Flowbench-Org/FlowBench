@@ -231,7 +231,8 @@ class PopularSearchPanelTests(unittest.TestCase):
         self.fetch_counts.assert_called_once()
         self.assertEqual(self.hot_rows(), [("新插件", ""), ("中间插件", ""), ("外部插件", ""),
                                            ("旧插件", "")])   # the incompatible one is left out
-        self.assertEqual(self.page.hotNote.text(), "暂无安装统计，按上架时间排列")
+        self.assertEqual(self.page.hotNote.text(), "安装统计约有两天延迟，暂按上架时间排列")
+        self.assertIn("两天", self.page.hotNote.toolTip())
 
     def test_real_installs_rank_first_and_are_shown(self):
         self.page._on_index(self.entries, False)
@@ -240,6 +241,7 @@ class PopularSearchPanelTests(unittest.TestCase):
         self.assertEqual(self.hot_rows(), [("旧插件", "1,520 次安装"), ("中间插件", "1 次安装"),
                                            ("新插件", ""), ("外部插件", "")])
         self.assertEqual(self.page.hotNote.text(), "按近 30 天安装次数")
+        self.assertIn("jsDelivr", self.page.hotNote.toolTip())
 
     def test_popular_searches_stay_visible_next_to_the_history(self):
         self.page._on_index(self.entries, False)
