@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.2.12] - 2026-11-10
+
+### Changed
+
+- With the sidebar collapsed to icons, hovering an item now shows its name at once in a speech bubble that points at the icon, instead of a plain tooltip after a one-second wait. Moving up and down the sidebar moves the bubble along; leaving, clicking, switching to another app or expanding the sidebar hides it. Pages added by plugins and the menu button get the same bubble, in light and dark themes.
+- Opening FlowBench again while it is already running (double-clicking the icon, the Start menu, a shortcut) no longer flashes the splash screen. The new launch asks the running copy to bring its window back, on the page it was showing, and exits. The running copy is allowed to come to the front instead of only flashing its taskbar button, and a maximized window comes back maximized instead of at its normal size.
+- Popular searches on the Plugins page now rank plugins by real installs over the last 30 days, with the count next to each one; they used to be just the newest plugins. Plugins in the FlowBench repository now download through jsDelivr, the public CDN for GitHub files, whose public download statistics are where the counts come from. GitHub is still the fallback: when jsDelivr is unreachable or still serves an older copy of a plugin, the download comes from GitHub instead and jsDelivr is asked to refresh its copy. Every download is still checked against the SHA-256 in the index.
+- The counts are fetched in the background and kept for six hours. Until any plugin has been installed through jsDelivr, the list says "No install stats yet; newest first" and falls back to the newest plugins.
+- Popular searches stay visible next to the search history; they used to disappear after the first search. Plugins that cannot be shown because they need a newer FlowBench are left out, since searching for them found nothing.
+- The search suggestions panel is fully opaque, so the plugin cards underneath no longer show through it.
+- Japanese language pack 1.0.5 translates the new messages.
+
+### Verified
+
+- Launched a second copy while FlowBench was running: it showed no splash, the running copy got the request to bring its window back, and the second copy exited at once. Covered the launch order, the hand-over, foreground permission on Windows and restoring a maximized window with automated tests.
+- Checked jsDelivr live: it serves the same bytes as GitHub for a repository file, and the statistics API answers; no plugin has been downloaded through it yet, so the list starts with "No install stats yet". Covered summing counts over commits and tags, saved and offline counts, falling back to GitHub for an unreachable or outdated CDN copy, and the popular list's ranking, display and search with automated tests.
+- Checked the sidebar bubble in Chinese light, Chinese dark and English, and the popular searches panel in Chinese and English, light and dark.
+- Passed the full automated test suite (163 tests, 1704 subtests).
+
 ## [1.2.11] - 2026-11-10
 
 ### Changed

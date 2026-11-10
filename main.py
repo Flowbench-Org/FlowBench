@@ -79,6 +79,22 @@ def resource_path(rel: str) -> str:
     return os.path.join(base, rel)
 
 
+def _allow_foreground_handoff() -> None:
+    """Let the running FlowBench bring its window to the front.
+
+    Windows only lets the foreground process raise its windows. That is this
+    new launch, which the user just started; without passing the right on,
+    the running copy could only flash its taskbar button.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        ctypes.windll.user32.AllowSetForegroundWindow(-1)    # ASFW_ANY
+    except Exception:
+        pass
+
+
 def is_already_running(attempts: int = 10) -> bool:
     """Notify the running instance and return whether the request was sent.
 
@@ -92,6 +108,7 @@ def is_already_running(attempts: int = 10) -> bool:
         socket = QLocalSocket()
         socket.connectToServer(SINGLE_INSTANCE_KEY)
         if socket.waitForConnected(100):
+            _allow_foreground_handoff()
             socket.write(b"show")
             socket.flush()
             socket.waitForBytesWritten(200)
@@ -181,37 +198,25 @@ def create_single_instance_server():
     return server
 
 
-def main():
-    # AUMID 必须在创建任何窗口之前设置，否则 Win10/11 会静默丢掉托盘气泡。
-    _set_app_user_model_id()
+def claim_instance():
+    """Decide, before anything is drawn, whether this launch opens FlowBench.
 
-    # ① 第一时间创建 QApplication 并显示启动画面
-    app = QApplication(sys.argv)
-    app.setApplicationName("FlowBench")
-    app.setApplicationDisplayName("FlowBench")
-    app.setOrganizationName("FlowBench")
-    ico = resource_path("app.ico")
-    if os.path.exists(ico):
-        app.setWindowIcon(QIcon(ico))
-    # The splash is the only top-level window during startup. Closing it
-    # before the main window is visible can queue an application quit event.
-    app.setQuitOnLastWindowClosed(False)
-    splash = create_splash()  # 这是双击后用户看到的第一样东西
-
-    # ② splash 已显示后立即抢占进程锁，再启动本地通信端点。
-    #    这样重复双击在整个启动阶段都只能留下一个进程。
+    Returns ``(None, lock, server)`` when it does. Otherwise returns
+    ``(exit_code, None, None)``: FlowBench is already running and has been
+    asked to bring back its window, on the page it was showing, or the lock
+    could not be taken. Such a launch exits without flashing the splash.
+    """
+    # The lock comes first and the launch endpoint right after it, so repeated
+    # double-clicks during startup still leave only one process.
     instance_lock = QLockFile(instance_lock_path())
     instance_lock.setStaleLockTime(60000)
-    if not instance_lock.tryLock(250):
+    if not instance_lock.tryLock(0):
         # A live instance owns the lock: notify it and exit this launch.
         if is_already_running():
-            splash.finish_splash()
-            return 0
+            return 0, None, None
 
         # If no server answered, the lock is from a previous crash or forced
         # termination. Remove only that stale lock, then acquire it again.
-        # Previously this path returned immediately, leaving users with only
-        # a brief splash screen and no main window.
         try:
             # The server endpoint is created immediately after the lock. If
             # no endpoint answered, this is a crash residue rather than a
@@ -222,16 +227,40 @@ def main():
         except (AttributeError, RuntimeError, OSError):
             pass
         if not instance_lock.tryLock(1000):
-            splash.finish_splash()
-            return 1
-    app._single_instance_lock = instance_lock
+            return 1, None, None
 
     local_server = create_single_instance_server()
     if local_server is None:
         instance_lock.unlock()
-        splash.finish_splash()
-        return 0
+        return 0, None, None
+    return None, instance_lock, local_server
+
+
+def main():
+    # AUMID 必须在创建任何窗口之前设置，否则 Win10/11 会静默丢掉托盘气泡。
+    _set_app_user_model_id()
+
+    # ① 创建 QApplication（启动画面要等确认这次启动负责打开窗口后才显示）
+    app = QApplication.instance() or QApplication(sys.argv)
+    app.setApplicationName("FlowBench")
+    app.setApplicationDisplayName("FlowBench")
+    app.setOrganizationName("FlowBench")
+    ico = resource_path("app.ico")
+    if os.path.exists(ico):
+        app.setWindowIcon(QIcon(ico))
+    # The splash is the only top-level window during startup. Closing it
+    # before the main window is visible can queue an application quit event.
+    app.setQuitOnLastWindowClosed(False)
+
+    # ② 先确认这次启动是不是要打开 FlowBench：已经在运行的话，只通知它
+    #    把窗口调到前面（还是原来的页面），这次启动直接退出，不闪启动画面。
+    exit_code, instance_lock, local_server = claim_instance()
+    if exit_code is not None:
+        return exit_code
+    app._single_instance_lock = instance_lock
     app._single_instance_server = local_server
+
+    splash = create_splash()  # 这是双击后用户看到的第一样东西
 
     # 便捷函数：设置进度 + 双语状态文字
     def step(percent, zh, en):

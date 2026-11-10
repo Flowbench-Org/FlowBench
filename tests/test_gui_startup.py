@@ -5,7 +5,8 @@ import tempfile
 import unittest
 import uuid
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("APPDATA", os.path.join(tempfile.gettempdir(), "FlowBench-gui-tests"))
@@ -162,6 +163,114 @@ class GuiStartupTests(unittest.TestCase):
                 server.deleteLater()
             QLocalServer.removeServer(name)
             main.SINGLE_INSTANCE_KEY = old_name
+
+
+    # -- launching again while FlowBench runs ---------------------------------
+
+    def _running_instance(self, directory):
+        """A held lock and a ready launch endpoint, like a running FlowBench."""
+        name = f"FlowBench-startup-test-{uuid.uuid4().hex}"
+        lock_path = os.path.join(directory, "FlowBench.instance.lock")
+        patches = [patch.object(main, "SINGLE_INSTANCE_KEY", name),
+                   patch.object(main, "instance_lock_path", return_value=lock_path)]
+        for item in patches:
+            item.start()
+            self.addCleanup(item.stop)
+        quit_on_close = self.app.quitOnLastWindowClosed()
+        self.addCleanup(self.app.setQuitOnLastWindowClosed, quit_on_close)
+        return name, lock_path
+
+    def test_second_launch_brings_back_the_window_without_a_splash(self):
+        with tempfile.TemporaryDirectory() as directory:
+            name, lock_path = self._running_instance(directory)
+            held = QLockFile(lock_path)
+            self.assertTrue(held.tryLock(0))
+            server = main.create_single_instance_server()
+            probe = _WindowProbe()
+            server.set_main_window(probe)
+            server.set_ready()
+            try:
+                with patch.object(main, "create_splash",
+                                  side_effect=AssertionError("splash shown")) as create:
+                    self.assertEqual(main.main(), 0)
+                create.assert_not_called()
+                for _ in range(20):
+                    if probe.show_requests:
+                        break
+                    QTest.qWait(20)
+                self.assertEqual(probe.show_requests, 1)
+            finally:
+                server.close()
+                server.deleteLater()
+                QLocalServer.removeServer(name)
+                held.unlock()
+
+    def test_first_launch_claims_the_instance_before_the_splash(self):
+        class Stop(Exception):
+            pass
+
+        seen = {}
+        with tempfile.TemporaryDirectory() as directory:
+            name, lock_path = self._running_instance(directory)
+
+            def splash_after_claim():
+                other = QLockFile(lock_path)
+                seen["locked"] = not other.tryLock(0)
+                seen["listening"] = self.app._single_instance_server.isListening()
+                raise Stop()
+
+            try:
+                with patch.object(main, "create_splash", side_effect=splash_after_claim):
+                    with self.assertRaises(Stop):
+                        main.main()
+            finally:
+                server = getattr(self.app, "_single_instance_server", None)
+                if server is not None:
+                    server.close()
+                    server.deleteLater()
+                    del self.app._single_instance_server
+                lock = getattr(self.app, "_single_instance_lock", None)
+                if lock is not None:
+                    lock.unlock()
+                    del self.app._single_instance_lock
+                QLocalServer.removeServer(name)
+        self.assertEqual(seen, {"locked": True, "listening": True})
+
+    def test_handoff_lets_the_running_copy_come_to_the_front(self):
+        name = f"FlowBench-startup-test-{uuid.uuid4().hex}"
+        server = QLocalServer()
+        self.assertTrue(server.listen(name))
+        user32 = SimpleNamespace(AllowSetForegroundWindow=Mock(return_value=1))
+        try:
+            with patch.object(main, "SINGLE_INSTANCE_KEY", name), \
+                    patch.object(main.sys, "platform", "win32"), \
+                    patch("ctypes.windll", SimpleNamespace(user32=user32), create=True):
+                self.assertTrue(main.is_already_running(attempts=3))
+        finally:
+            server.close()
+            QLocalServer.removeServer(name)
+        user32.AllowSetForegroundWindow.assert_called_once_with(-1)
+
+    def test_bringing_back_keeps_a_maximized_window_maximized(self):
+        from PySide6.QtWidgets import QWidget
+        from app.ui.main_window import MainWindow
+        window = QWidget()
+        self.addCleanup(window.deleteLater)
+        window.showMaximized()
+        QTest.qWait(30)
+        window.showMinimized()
+        QTest.qWait(30)
+        self.assertTrue(window.isMinimized())
+        MainWindow._show_from_tray(window)
+        QTest.qWait(30)
+        self.assertFalse(window.isMinimized())
+        self.assertTrue(window.isMaximized())
+        window.hide()                         # minimized to the tray
+        MainWindow._show_from_tray(window)
+        QTest.qWait(30)
+        self.assertTrue(window.isVisible())
+        self.assertTrue(window.isMaximized())
+        window.close()
 
 
 if __name__ == "__main__":

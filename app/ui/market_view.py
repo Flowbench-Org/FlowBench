@@ -85,8 +85,9 @@ class _SearchSuggestCard(SimpleCardWidget):
         self.setBackgroundColor(self._normalBackgroundColor())
 
     def _normalBackgroundColor(self):
-        return QColor(45, 45, 45, 250) if isDarkTheme() \
-            else QColor(250, 250, 250, 252)
+        # Fully opaque: even alpha 250 let the plugin cards underneath show
+        # through as faint text.
+        return QColor(45, 45, 45) if isDarkTheme() else QColor(250, 250, 250)
 
     def _hoverBackgroundColor(self):
         return self._normalBackgroundColor()
@@ -953,7 +954,10 @@ class PluginMarketPage(QWidget):
         root.addLayout(topbar)
 
         # 点击搜索框后出现的热门搜索 / 搜索历史面板。
-        self._hot_searches = []
+        # 热门按 jsDelivr 统计的近 30 天真实安装次数排序。
+        self._hot_searches = []          # [(关键词, 安装次数), ...]
+        self._hot_entries = []
+        self._install_counts = {}
         saved_favorites = settings.plugin_market_favorites
         self._favorite_ids = {
             str(x).strip() for x in saved_favorites if str(x).strip()
@@ -989,6 +993,9 @@ class PluginMarketPage(QWidget):
                                         self.searchSuggestPanel)
         hot_head.addWidget(self.hotTitle)
         hot_head.addStretch(1)
+        # 说明排名依据：真实安装次数，或者暂时还没有统计。
+        self.hotNote = CaptionLabel("", self.searchSuggestPanel)
+        hot_head.addWidget(self.hotNote)
         suggest_lay.addLayout(hot_head)
         self.hotHost = QWidget(self.searchSuggestPanel)
         hot_lay = QVBoxLayout(self.hotHost)
@@ -1012,19 +1019,18 @@ class PluginMarketPage(QWidget):
             rank_label.setAttribute(Qt.WA_TransparentForMouseEvents)
             btn_lay.addWidget(rank_label)
             term_label = QLabel("", btn)
-            term_label.setAlignment(Qt.AlignCenter)
+            term_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             term_label.setAttribute(Qt.WA_TransparentForMouseEvents)
             btn_lay.addWidget(term_label, 1)
-            # 与左侧排名等宽，让插件名称保持视觉居中。
-            right_spacer = QWidget(btn)
-            right_spacer.setFixedWidth(26)
-            right_spacer.setAttribute(Qt.WA_TransparentForMouseEvents)
-            btn_lay.addWidget(right_spacer)
+            count_label = QLabel("", btn)
+            count_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            count_label.setAttribute(Qt.WA_TransparentForMouseEvents)
+            btn_lay.addWidget(count_label)
             btn.clicked.connect(
                 lambda _checked=False, b=btn: self._use_search_term(
                     b.property("searchTerm")))
             hot_lay.addWidget(btn)
-            self._hot_buttons.append((btn, rank_label, term_label))
+            self._hot_buttons.append((btn, rank_label, term_label, count_label))
         suggest_lay.addWidget(self.hotHost)
 
         history_head = QHBoxLayout()
@@ -1109,6 +1115,7 @@ class PluginMarketPage(QWidget):
         self.client.fetch_error.connect(self._on_error)
         self.client.download_ready.connect(self._on_downloaded)
         self.client.download_failed.connect(self._on_download_failed)
+        self.client.install_counts_ready.connect(self._on_install_counts)
         plugin_manager.changed.connect(lambda: QTimer.singleShot(0, self._refresh_buttons))
         self._load_github_identity()
         self._all_cards = []
@@ -1197,7 +1204,11 @@ class PluginMarketPage(QWidget):
             self._all_cards.append(card)
         self._market_source_suffix = (
             L("（离线缓存）", " (offline cache)") if from_cache else "")
-        self._update_hot_searches(entries)
+        # Only plugins that have a card here: searching for one that is hidden
+        # as incompatible would find nothing.
+        self._update_hot_searches([card.entry for card in self._all_cards])
+        if self._all_cards:
+            self.client.fetch_install_counts()
         self._update_filter_counts()
         self._resort()
         self._apply_filter(self.searchEdit.text())
@@ -1451,42 +1462,65 @@ class PluginMarketPage(QWidget):
         if str(text or "").strip():
             self._search_commit_timer.start()
 
-    def _update_hot_searches(self, entries):
-        """从市场条目生成热门词；有热度统计时优先按统计值排序。"""
-        def score(entry):
-            popularity = 0
-            for key in ("popularity", "downloads", "download_count",
-                        "install_count", "stars"):
-                try:
-                    popularity = max(popularity, int(entry.get(key, 0) or 0))
-                except (TypeError, ValueError):
-                    pass
-            return popularity, str(entry.get("date", "") or "")
+    def _install_count(self, entry) -> int:
+        """近 30 天的真实安装次数；不在仓库里的插件没有统计，记 0。"""
+        file_value = entry.get("file")
+        if not isinstance(file_value, str):
+            return 0
+        return int(self._install_counts.get(file_value, 0) or 0)
 
-        terms = []
+    def _on_install_counts(self, counts):
+        self._install_counts = dict(counts or {})
+        self._update_hot_searches(self._hot_entries)
+
+    def _update_hot_searches(self, entries):
+        """热门词：按近 30 天安装次数排序，次数相同（含还没有统计）时新上架的在前。"""
+        self._hot_entries = list(entries or [])
+
+        def score(entry):
+            return self._install_count(entry), str(entry.get("date", "") or "")
+
+        hot = []
         folded_terms = set()
-        for entry in sorted(entries or [], key=score, reverse=True):
+        for entry in sorted(self._hot_entries, key=score, reverse=True):
             term = _i18n_text(entry.get("name", "")).strip()
             folded = term.casefold()
             if term and folded not in folded_terms:
-                terms.append(term)
+                hot.append((term, self._install_count(entry)))
                 folded_terms.add(folded)
-            if len(terms) >= self._MAX_HOT_SEARCHES:
+            if len(hot) >= self._MAX_HOT_SEARCHES:
                 break
-        self._hot_searches = terms
+        self._hot_searches = hot
         self._refresh_search_suggestions()
+
+    @staticmethod
+    def _install_count_text(count: int) -> str:
+        if count <= 0:
+            return ""
+        if count == 1:
+            return L("1 次安装", "1 install")
+        return L(f"{count:,} 次安装", f"{count:,} installs")
 
     def _refresh_search_suggestions(self):
         """刷新热门词和历史列表，不重建控件以避免界面闪动。"""
-        for i, (btn, _rank_label, term_label) in enumerate(self._hot_buttons):
+        any_counts = any(count > 0 for _term, count in self._hot_searches)
+        self.hotNote.setText(
+            L("按近 30 天安装次数", "By installs in the last 30 days") if any_counts
+            else L("暂无安装统计，按上架时间排列", "No install stats yet; newest first"))
+        for i, (btn, _rank_label, term_label, count_label) in enumerate(self._hot_buttons):
             visible = i < len(self._hot_searches)
-            term = self._hot_searches[i] if visible else ""
+            term, count = self._hot_searches[i] if visible else ("", 0)
             btn.setProperty("searchTerm", term)
             term_label.setText(term)
             term_label.setStyleSheet(
                 "color: #FFFFFF; background: transparent;"
                 if isDarkTheme()
                 else "color: #1F1F1F; background: transparent;")
+            count_label.setText(self._install_count_text(count))
+            count_label.setStyleSheet(
+                "color: rgba(255, 255, 255, 0.62); background: transparent;"
+                if isDarkTheme()
+                else "color: rgba(0, 0, 0, 0.55); background: transparent;")
             btn.setToolTip(term)
             btn.setAccessibleName(
                 L(f"第 {i + 1} 名热门搜索：{term}",
@@ -1494,9 +1528,10 @@ class PluginMarketPage(QWidget):
             btn.setVisible(visible)
 
         has_history = bool(self._search_history)
-        show_hot = bool(self._hot_searches) and not has_history
+        show_hot = bool(self._hot_searches)       # shown next to the history too
         show_empty = not show_hot and not has_history
         self.hotTitle.setVisible(show_hot)
+        self.hotNote.setVisible(show_hot)
         self.hotHost.setVisible(show_hot)
         self.historyTitle.setVisible(has_history)
         self.historyClearBtn.setVisible(has_history)

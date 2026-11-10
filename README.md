@@ -43,7 +43,7 @@ FlowBench is a Windows desktop application for network stress testing and perfor
 
 FlowBench v1.1.0 ships with a full plugin platform — extend the app with your own features:
 
-- **Plugin Marketplace**: browse, search, install and update community plugins with one click (integrity-verified via SHA-256)
+- **Plugin Marketplace**: browse, search, install and update community plugins with one click (integrity-verified via SHA-256). Popular searches rank plugins by real installs over the last 30 days, using jsDelivr's public download statistics
 - **Local Plugin Management**: enable / disable / reload / remove plugins instantly; metadata and icons stay visible when disabled
 - **One-click Publish**: publish your own plugins to the marketplace directly from the app via GitHub OAuth device flow — no manual token generation. External submissions create pull requests for manual maintainer review
 - **One-click Unpublish**: plugin authors can remove their own listings at any time
@@ -85,7 +85,7 @@ One step (stops at the first failure and prints the installer path):
 
 ```bash
 powershell -ExecutionPolicy Bypass -File build_installer.ps1
-# Output: installer/FlowBench-Setup-1.2.11.exe
+# Output: installer/FlowBench-Setup-1.2.12.exe
 ```
 
 Only Python and PyInstaller are needed; the installer is FlowBench's own (`flowbench_installer/`),
@@ -99,7 +99,7 @@ powershell -File build_all.ps1
 python -m PyInstaller --clean --noconfirm Uninstall.spec
 python tools/make_payload.py
 python -m PyInstaller --clean --noconfirm Setup.spec
-# Output: dist/FlowBench-Setup-1.2.11.exe
+# Output: dist/FlowBench-Setup-1.2.12.exe
 ```
 
 To publish, upload `FlowBench-Setup-<version>.exe` to the GitHub release under exactly that
@@ -152,7 +152,7 @@ FlowBench 是一款 Windows 桌面端的网络压力测试与性能监控工具�
 
 FlowBench v1.1.0 内置完整插件平台，可以自由扩展功能：
 
-- **插件市场**：浏览、搜索、一键安装和更新社区插件（SHA-256 完整性校验）
+- **插件市场**：浏览、搜索、一键安装和更新社区插件（SHA-256 完整性校验）；热门搜索按近 30 天的真实安装次数排序，数据来自 jsDelivr 公开的下载统计
 - **本地插件管理**：即时启用 / 禁用 / 重载 / 删除插件；禁用后图标和元数据保持显示
 - **一键发布**：通过 GitHub OAuth 设备授权，直接在软件内把你的插件发布到市场 —— 无需手动生成令牌；外部提交会创建 PR，由维护者人工审核
 - **一键下架**：插件作者可随时下架自己发布的插件
@@ -192,7 +192,7 @@ python main.py
 
 ```bash
 powershell -ExecutionPolicy Bypass -File build_installer.ps1
-# 产物位于 installer/FlowBench-Setup-1.2.11.exe
+# 产物位于 installer/FlowBench-Setup-1.2.12.exe
 ```
 
 只需要 Python 和 PyInstaller。安装程序是 FlowBench 自己的（`flowbench_installer/`），
@@ -206,7 +206,7 @@ powershell -File build_all.ps1
 python -m PyInstaller --clean --noconfirm Uninstall.spec
 python tools/make_payload.py
 python -m PyInstaller --clean --noconfirm Setup.spec
-# 产物位于 dist/FlowBench-Setup-1.2.11.exe
+# 产物位于 dist/FlowBench-Setup-1.2.12.exe
 ```
 
 发布时把 `FlowBench-Setup-<版本号>.exe` 原名上传到 GitHub Release，软件内更新按这个文件名查找。
