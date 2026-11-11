@@ -329,6 +329,17 @@ _RESOURCES = [
     ('負荷テスト', '压力测试', 'Stress Test'),
     ('共同テスト', '协同测试', 'Collaborative'),
     ('モニター', '监控面板', 'Monitor'),
+    ('監視対象', '监控对象', 'Source'),
+    ('この PC', '本机', 'This PC'),
+    ('この PC とサーバーノードのどちらを監視するか選びます。サーバーノードの一覧は「サーバーノード」ページの制御チャネルから取得します。', '选择监控本机还是某台服务器节点。服务器节点列表来自“服务器节点”页的控制通道。', 'Monitor this PC or a server agent. Servers come from the control channel on the Server Agents page.'),
+    ('{#0}（オフライン）', '{#0}（离线）', '{#0} (offline)'),
+    ('「サーバーノード」ページで Hub またはリレーに接続すると、右上の「監視対象」でサーバーに切り替えて、CPU・メモリ・ネットワークを確認できます。', '在“服务器节点”页连接 Hub 或中继后，可以在右上角“监控对象”里切换到服务器，查看它的 CPU、内存和网络。', 'Connect a Hub or relay on the Server Agents page, then pick a server under Source to see its CPU, memory and network.'),
+    ('制御チャネルに接続できません：{#0}', '无法连接控制通道：{#0}', 'Cannot reach the control channel: {#0}'),
+    ('このサーバーのノードは古いバージョンのため、CPU・メモリ・ネットワークのデータを送信しません。「サーバーノード」ページでノードパッケージを生成し直し、サーバー上のノードファイルを置き換えてノードを再起動してください。', '这台服务器上的节点版本较旧，不会上报 CPU、内存和网络数据。请在“服务器节点”页重新生成节点包，替换服务器上的节点文件并重启节点。', 'The agent on this server is an older version that does not report CPU, memory or network data. Generate the node again on the Server Agents page, replace the agent files on the server and restart the agent.'),
+    ('このサーバーはシステムデータを読み取れません：{#0}', '这台服务器读不到系统数据：{#0}', 'This server cannot read its system data: {#0}'),
+    ('サーバーノードからのデータを待っています…', '正在等待服务器节点上报数据…', 'Waiting for the server agent to report…'),
+    ('サーバーノードはオフラインです。最後に受信したデータを表示しています。', '服务器节点已离线，下面是最后收到的数据。', 'The server agent is offline; showing the last data received.'),
+    ('オンライン：{#0}。毎秒サンプリングし、約 2 秒ごとに更新します。', '在线：{#0}。每秒采样一次，约每 2 秒刷新。', 'Online: {#0}. Sampled every second, refreshed about every 2 seconds.'),
     ('プラグイン', '插件', 'Plugins'),
     ('設定', '设置', 'Settings'),
     ('ウィンドウを表示', '显示主窗口', 'Show Window'),
@@ -1046,7 +1057,7 @@ def uninstall():
 class Plugin(FlowBenchPlugin):
     name = ("日语语言包", "Japanese Language Pack")
     title = "日本語言語パック"
-    version = "1.0.8"
+    version = "1.0.9"
     author = "FlowBench"
     description = (
         "将 FlowBench 1.2.10 的界面、对话框和动态提示转换为日语，兼容深浅色主题；启用即生效。",

@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- The Monitor page can now show a server agent instead of this PC: pick it under **Source** at the top right. Its CPU usage, memory, network download and upload, TCP connections and processes appear in the same cards and charts as the local ones, with the same time windows, pause, clear and CSV export. The servers come from the control channel set on the Server Agents page (a Hub or the MQTT relay), and offline servers are marked. This PC keeps being recorded while a server is shown.
+- Server agents sample CPU, memory, network, TCP connections and processes once a second and send the last 15 seconds with every heartbeat, which now comes every 2 seconds (`metrics_interval`, default 2; `"metrics": false` turns it off and brings back the 10-second heartbeat). Because each heartbeat repeats the recent samples, the desktop keeps one point per second when a heartbeat or a poll is missed, and drops the repeats. On Linux the agent reads `/proc`, so no new package is needed; the network figures leave out the loopback interface. The Windows agent uses psutil, now bundled into `FlowBench-Agent.exe`. The samples travel inside the heartbeat, so an existing Hub passes them on without being updated.
+- An agent deployed before this version does not send these figures; the Monitor page says so and asks to generate the node again and replace the agent on the server. Waiting for the first data, an offline server (the last data received stays on screen) and an unreachable control channel are explained under the toolbar too.
+
+### Changed
+
+- The three node bundles (existing Hub, all-in-one and MQTT relay) take the Linux agent's files from one list, which gained `agent/sysmetrics.py`. A test checks that this list, `FlowBench.spec` and `Agent.spec` cover every module the agent imports, and that each extracted bundle starts on its own.
+- Japanese language pack 1.0.9 translates the new messages.
+
+### Verified
+
+- Ran a real Hub and agent process on Linux and read them with the desktop's client: one sample per second arrived without gaps or repeats, and the `/proc` readings matched psutil (memory 81.3 % in both, TCP connections 73 against 74, processes 250 against 249). The relay path was checked with a real signed status message and the desktop's message handler, not against the public broker. Looked at the Monitor page in Chinese and English, light and dark, with a live server, an older agent and no servers.
+
 ## [1.2.13] - 2026-11-11
 
 ### Changed

@@ -130,6 +130,12 @@ python server_agent.py --config agent.json
 
 Seeing `online as server-01` means the Agent is online. The server only needs outbound HTTPS access to the Hub; no inbound ports need to be opened for the Agent.
 
+### System metrics
+
+The Agent samples its server's CPU usage, memory, network throughput (loopback left out), TCP connections and processes once a second and sends the last 15 seconds with every heartbeat. While metrics are on, a heartbeat goes out every `metrics_interval` seconds (default `2`, from 1 to 60). Add `"metrics": false` to turn them off and go back to `heartbeat_interval`.
+
+On the desktop, open **Monitor** and choose the server under **Source**. On Linux the Agent reads `/proc` and needs no extra package; inside a container, CPU and memory are the host's figures unless the container has its own `/proc` (for example with LXCFS). The Windows `FlowBench-Agent.exe` uses psutil, which is bundled. An Agent from an older FlowBench does not send metrics: replace its files (or the exe) with a newly generated node bundle and restart it.
+
 ## 4. View and send tasks from the control side
 
 Copy `agent/controller.example.json` to `controller.json`, filling in the Hub address and `controller_token`.
