@@ -357,6 +357,10 @@ _RESOURCES = [
     ('状態：{#0}', '状态：{#0}', 'State: {#0}'),
     ('プラグインを削除', '删除插件', 'Remove Plugin'),
     ('プラグイン「{#0}」を削除しますか？ファイルも削除されます。', '确定删除插件"{#0}"？插件文件将从磁盘移除。', 'Remove plugin "{#0}"? Its files will be deleted.'),
+    ('プラグインを無効化：{#0}', '停用插件：{#0}', 'Disable plugin: {#0}'),
+    ('プラグインを有効化：{#0}', '启用插件：{#0}', 'Enable plugin: {#0}'),
+    ('プラグインを再読み込み：{#0}', '重载插件：{#0}', 'Reload plugin: {#0}'),
+    ('プラグインを削除：{#0}', '删除插件：{#0}', 'Remove plugin: {#0}'),
     ('プラグインはアプリと同じ権限で動く第三者のコードです。信頼できる提供元のものだけをインストールしてください。免責事項も適用されます。', '插件为第三方代码，拥有与主程序相同的权限，请仅安装可信来源的插件；插件行为同样受免责声明约束。', 'Plugins are third-party code with the same privileges as the app. Only install from trusted sources; the disclaimer applies.'),
     ('プラグインをインポート…', '导入插件…', 'Import Plugin…'),
     ('プラグインフォルダを開く', '打开插件目录', 'Open Plugin Folder'),
@@ -1042,7 +1046,7 @@ def uninstall():
 class Plugin(FlowBenchPlugin):
     name = ("日语语言包", "Japanese Language Pack")
     title = "日本語言語パック"
-    version = "1.0.7"
+    version = "1.0.8"
     author = "FlowBench"
     description = (
         "将 FlowBench 1.2.10 的界面、对话框和动态提示转换为日语，兼容深浅色主题；启用即生效。",

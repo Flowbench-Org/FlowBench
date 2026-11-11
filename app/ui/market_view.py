@@ -17,7 +17,7 @@ import unicodedata
 
 import requests
 from PySide6.QtCore import (QEvent, QEasingCurve, QPoint, QPropertyAnimation,
-                            QRect, QRectF, Qt, QTimer, QUrl, Signal)
+                            QRect, QRectF, QSize, Qt, QTimer, QUrl, Signal)
 from PySide6.QtGui import (QColor, QDesktopServices, QIcon, QKeySequence,
                            QPainter, QPainterPath, QPixmap, QShortcut)
 from PySide6.QtWidgets import (QApplication, QFileDialog, QGridLayout,
@@ -31,7 +31,7 @@ from qfluentwidgets import (Action, BodyLabel, CaptionLabel, ComboBox,
                             ScrollArea, SearchLineEdit, SimpleCardWidget,
                             StrongBodyLabel, SubtitleLabel, SwitchButton,
                             TextEdit, ToolButton, TransparentDropDownToolButton,
-                            qconfig)
+                            VerticalSeparator, qconfig, setCustomStyleSheet)
 
 from app.services.market import (INDEX_EDIT_URL, MarketClient,
                                  GITHUB_OAUTH_CLIENT_ID, device_flow_start,
@@ -504,86 +504,165 @@ class MarketCard(SimpleCardWidget):
 
 # ---------- 本地插件页 ----------
 
-class LocalPluginRow(QWidget):
-    """单个本地插件条目。支持增量更新（避免重建导致跳变）。"""
+class _StatePill(QWidget):
+    """插件状态小标签：运行中（绿）/ 已禁用（灰）/ 加载失败（红），按当前主题取色。"""
+
+    # (浅色文字, 深色文字)；底色用同一颜色的低透明度
+    _COLORS = {
+        "loaded": ("#0f7b0f", "#6ccb5f"),
+        "error": ("#c42b1c", "#ff99a4"),
+    }
+    _NEUTRAL = ("#5f5f5f", "#c5c5c5")
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._state = ""
+        self._text = ""
+        font = self.font()
+        font.setPixelSize(12)
+        self.setFont(font)
+        qconfig.themeChanged.connect(self.update)
+
+    def set_state(self, state: str, text: str):
+        self._state, self._text = state, text
+        self.setAccessibleName(text)
+        self.updateGeometry()
+        self.update()
+
+    def text(self) -> str:
+        return self._text
+
+    def color(self) -> QColor:
+        light, dark = self._COLORS.get(self._state, self._NEUTRAL)
+        return QColor(dark if isDarkTheme() else light)
+
+    def sizeHint(self):
+        fm = self.fontMetrics()
+        return QSize(fm.horizontalAdvance(self._text) + 16, fm.height() + 6)
+
+    def minimumSizeHint(self):
+        return self.sizeHint()
+
+    def paintEvent(self, _e):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        color = self.color()
+        fill = QColor(color)
+        fill.setAlpha(46 if isDarkTheme() else 30)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(fill)
+        rect = QRectF(self.rect())
+        painter.drawRoundedRect(rect, rect.height() / 2, rect.height() / 2)
+        painter.setPen(color)
+        painter.drawText(self.rect(), Qt.AlignCenter, self._text)
+
+
+class LocalPluginCard(SimpleCardWidget):
+    """一个本地插件的卡片，和插件市场的卡片同一种外框。
+
+    左边图标，中间名称、版本、状态和简介，右边一行操作：重载、删除，
+    分隔线后面是启用开关。支持增量更新（避免重建导致跳变）。
+    """
 
     def __init__(self, rec, parent=None):
         super().__init__(parent)
         self._rec = rec
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(0, 4, 0, 4)
-        lay.setSpacing(10)
+        lay.setContentsMargins(16, 12, 16, 12)
+        lay.setSpacing(14)
 
-        # 图标
+        # 图标（与市场卡片同样大小）
         self._icon_label = QLabel(self)
-        self._icon_label.setFixedSize(36, 36)
+        self._icon_label.setFixedSize(_ICON_SIZE, _ICON_SIZE)
         self._icon_label.setAlignment(Qt.AlignCenter)
         self._set_local_icon(self._icon_label, rec)
-        lay.addWidget(self._icon_label, 0, Qt.AlignTop)
+        lay.addWidget(self._icon_label, 0, Qt.AlignVCenter)
 
-        col = QVBoxLayout()
-        col.setSpacing(2)
-        name = _i18n_text(rec.display_name)
-        ver = rec.display_version or ""
-        self._title_label = StrongBodyLabel(f"{name}  {ver}".strip(), self)
-        col.addWidget(self._title_label)
+        self._text_col = QVBoxLayout()
+        self._text_col.setContentsMargins(0, 0, 0, 0)
+        self._text_col.setSpacing(2)
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(8)
+        self._title_label = StrongBodyLabel("", self)
+        title_row.addWidget(self._title_label)
+        self._version_label = CaptionLabel("", self)
+        title_row.addWidget(self._version_label)
+        self._state_pill = _StatePill(self)
+        title_row.addWidget(self._state_pill, 0, Qt.AlignVCenter)
+        title_row.addStretch(1)
+        self._text_col.addLayout(title_row)
         self._desc_label = CaptionLabel("", self)
         self._desc_label.setWordWrap(True)
-        self._update_desc(rec)
-        col.addWidget(self._desc_label)
-        self._state_label = CaptionLabel("", self)
-        col.addWidget(self._state_label)
-        self._error_label = None
-        self._update_state(rec)
-        lay.addLayout(col, 1)
+        self._text_col.addWidget(self._desc_label)
+        self._error_label = CaptionLabel("", self)
+        self._error_label.setWordWrap(True)
+        setCustomStyleSheet(self._error_label,
+                            "FluentLabelBase{color:#c42b1c;}",
+                            "FluentLabelBase{color:#ff99a4;}")
+        self._error_label.hide()
+        self._text_col.addWidget(self._error_label)
+        lay.addLayout(self._text_col, 1)
 
-        btn_col = QVBoxLayout()
-        btn_col.setSpacing(4)
-        self._switch = SwitchButton()
-        self._switch.blockSignals(True)
-        self._switch.setChecked(rec.state == "loaded")
-        self._switch.blockSignals(False)
-        self._switch.checkedChanged.connect(
-            lambda v, pid=rec.pid: plugin_manager.set_enabled(pid, v))
-        btn_row1 = QHBoxLayout()
-        btn_row1.addWidget(self._switch)
-        reload_btn = PushButton(L("重载", "Reload"), self)
-        reload_btn.clicked.connect(lambda _=False, pid=rec.pid: self._reload(pid))
-        btn_row1.addWidget(reload_btn)
-        btn_row1.addStretch(1)
-        btn_col.addLayout(btn_row1)
-        self._del_btn = PushButton(L("删除", "Remove"), self)
+        # 右侧操作：一行，竖直居中；每张卡片的按钮相同，所以上下对齐
+        self.actions = QWidget(self)
+        act = QHBoxLayout(self.actions)
+        act.setContentsMargins(0, 0, 0, 0)
+        act.setSpacing(8)
+        self._reload_btn = PushButton(FIF.SYNC, L("重载", "Reload"), self.actions)
+        self._reload_btn.clicked.connect(lambda _=False: self._reload(self._rec.pid))
+        act.addWidget(self._reload_btn)
+        self._del_btn = PushButton(FIF.DELETE.colored(QColor("#c42b1c"), QColor("#ff99a4")),
+                                   L("删除", "Remove"), self.actions)
+        setCustomStyleSheet(self._del_btn, "PushButton{color:#c42b1c;}",
+                            "PushButton{color:#ff99a4;}")
         self._del_btn.clicked.connect(
-            lambda _=False, pid=rec.pid, nm=_i18n_text(rec.display_name): self._remove(pid, nm))
-        btn_row2 = QHBoxLayout()
-        btn_row2.addWidget(self._del_btn)
-        btn_row2.addStretch(1)
-        btn_col.addLayout(btn_row2)
-        lay.addLayout(btn_col)
+            lambda _=False: self._remove(self._rec.pid, _i18n_text(self._rec.display_name)))
+        act.addWidget(self._del_btn)
+        act.addSpacing(4)
+        self._separator = VerticalSeparator(self.actions)
+        self._separator.setFixedHeight(24)
+        act.addWidget(self._separator, 0, Qt.AlignVCenter)
+        act.addSpacing(4)
+        self._switch = SwitchButton(self.actions)
+        self._switch.setOnText("")
+        self._switch.setOffText("")
+        self._switch.label.hide()           # 状态写在名称旁的标签里，开关本身不带字
+        self._switch.checkedChanged.connect(
+            lambda v: plugin_manager.set_enabled(self._rec.pid, v))
+        act.addWidget(self._switch, 0, Qt.AlignVCenter)
+        lay.addWidget(self.actions, 0, Qt.AlignVCenter)
+
+        self.update_from_record(rec)
 
     # ---------- 增量更新 ----------
 
     def update_from_record(self, rec):
         """根据最新的 _PluginRecord 增量更新显示。"""
         self._rec = rec
-        # 更新标题
-        name = _i18n_text(rec.display_name)
-        ver = rec.display_version or ""
-        self._title_label.setText(f"{name}  {ver}".strip())
-        self._del_btn.clicked.disconnect()
-        self._del_btn.clicked.connect(
-            lambda _=False, pid=rec.pid, nm=name: self._remove(pid, nm))
+        name = _i18n_text(rec.display_name) or rec.pid
+        self._title_label.setText(name)
+        ver = str(rec.display_version or "").strip()
+        if ver and ver[:1] not in "vV":
+            ver = f"v{ver}"
+        self._version_label.setText(ver)
+        self._version_label.setVisible(bool(ver))
         # 更新图标（加载完成后 display_name/icon 才可用，需同步刷新，
         # 否则首次 refresh 时插件尚未加载，图标会一直停留在 pid 首字母）
         self._refresh_icon(rec)
-        # 更新描述
         self._update_desc(rec)
-        # 更新状态
         self._update_state(rec)
         # 更新开关（不触发信号）
+        enabled = rec.state == "loaded"
         self._switch.blockSignals(True)
-        self._switch.setChecked(rec.state == "loaded")
+        self._switch.setChecked(enabled)
         self._switch.blockSignals(False)
+        tip = (L(f"停用插件：{name}", f"Disable plugin: {name}") if enabled
+               else L(f"启用插件：{name}", f"Enable plugin: {name}"))
+        self._switch.setToolTip(tip)
+        self._switch.setAccessibleName(tip)
+        self._reload_btn.setAccessibleName(L(f"重载插件：{name}", f"Reload plugin: {name}"))
+        self._del_btn.setAccessibleName(L(f"删除插件：{name}", f"Remove plugin: {name}"))
 
     def _refresh_icon(self, rec):
         """重设图标：先清掉兜底文字/样式，再按优先级设置真实图标或首字。"""
@@ -602,45 +681,22 @@ class LocalPluginRow(QWidget):
         if desc:
             desc_parts.append(desc)
         self._desc_label.setText(" · ".join(desc_parts))
+        self._desc_label.setVisible(bool(desc_parts))
 
     def _update_state(self, rec):
-        """更新状态文本和错误行。"""
-        from qfluentwidgets import setCustomStyleSheet
+        """更新状态标签和错误行。"""
         state_map = {
             "loaded": L("运行中", "Running"),
             "disabled": L("已禁用", "Disabled"),
             "error": L("加载失败", "Load failed"),
             "unloaded": L("未加载", "Not loaded"),
         }
-        state_text = state_map.get(rec.state, rec.state)
-        self._state_label.setText(L(f"状态：{state_text}", f"State: {state_text}"))
-        if rec.state == "error":
-            # 用 setCustomStyleSheet 而非 setStyleSheet：后者会清空 CaptionLabel
-            # 自带的主题色规则，导致深色模式下文字回退成黑色
-            setCustomStyleSheet(
-                self._state_label,
-                "FluentLabelBase{color:#e81123;}",
-                "FluentLabelBase{color:#e81123;}")
-            self._state_label.setToolTip(rec.error or "")
-        else:
-            # 传空串：清除 error 时加的红色规则，恢复 CaptionLabel 默认主题色
-            setCustomStyleSheet(self._state_label, "", "")
-            self._state_label.setToolTip("")
-        # 错误详情行
-        if self._error_label is not None:
-            self._error_label.setParent(None)
-            self._error_label = None
-        if rec.state == "error" and rec.error:
-            self._error_label = CaptionLabel(str(rec.error).splitlines()[0], self)
-            setCustomStyleSheet(
-                self._error_label,
-                "FluentLabelBase{color:#e81123;}",
-                "FluentLabelBase{color:#e81123;}")
-            self._error_label.setWordWrap(True)
-            # 插入到 state_label 后面
-            lay = self.layout()
-            idx = lay.indexOf(self._state_label)
-            lay.insertWidget(idx + 1, self._error_label)
+        self._state_pill.set_state(rec.state, state_map.get(rec.state, str(rec.state)))
+        error = str(rec.error or "") if rec.state == "error" else ""
+        self._state_pill.setToolTip(error)
+        self._error_label.setText(error.splitlines()[0] if error else "")
+        self._error_label.setToolTip(error)
+        self._error_label.setVisible(bool(error))
 
     @staticmethod
     def _set_local_icon(label: QLabel, rec):
@@ -657,11 +713,11 @@ class LocalPluginRow(QWidget):
                                      icon_val=rec.display_icon)
             if ic is not None:
                 try:
-                    pm = ic.pixmap(36, 36)
+                    pm = ic.pixmap(_ICON_SIZE, _ICON_SIZE)
                 except Exception:
                     pm = None
         if pm is not None and not pm.isNull():
-            label.setPixmap(pm.scaled(36, 36, Qt.KeepAspectRatio,
+            label.setPixmap(pm.scaled(_ICON_SIZE, _ICON_SIZE, Qt.KeepAspectRatio,
                                       Qt.SmoothTransformation))
             return
         # 兜底：彩色首字块
@@ -670,7 +726,7 @@ class LocalPluginRow(QWidget):
         label.setText(ch)
         bg = _fallback_color({"id": rec.pid})
         label.setStyleSheet(
-            f"color:#FFFFFF; font-size:16px; font-weight:600;"
+            f"color:#FFFFFF; font-size:18px; font-weight:600;"
             f"background:{bg};"
             f" border-radius:6px;")
 
@@ -728,7 +784,7 @@ class LocalPluginsPage(QWidget):
         self.listHost.setStyleSheet("#localListHost{background: transparent;}")
         self.listLay = QVBoxLayout(self.listHost)
         self.listLay.setContentsMargins(0, 0, 0, 0)
-        self.listLay.setSpacing(2)
+        self.listLay.setSpacing(8)
         self.listLay.addStretch(1)
         self.listScroll.setWidget(self.listHost)
         root.addWidget(self.listScroll, 1)
@@ -756,7 +812,7 @@ class LocalPluginsPage(QWidget):
         existing = {}
         for i in range(self.listLay.count()):
             w = self.listLay.itemAt(i).widget()
-            if w is not None and isinstance(w, LocalPluginRow):
+            if w is not None and isinstance(w, LocalPluginCard):
                 existing[w._rec.pid] = w
         # 按最新 records 顺序更新/添加
         seen = set()
@@ -772,7 +828,7 @@ class LocalPluginsPage(QWidget):
                     self.listLay.removeWidget(row)
                     self.listLay.insertWidget(row_index, row)
             else:
-                new_row = LocalPluginRow(rec, self)
+                new_row = LocalPluginCard(rec, self)
                 self.listLay.insertWidget(row_index, new_row)
             row_index += 1
         # 删除已不存在的行
@@ -784,7 +840,7 @@ class LocalPluginsPage(QWidget):
         empty_label = None
         for i in range(self.listLay.count()):
             w = self.listLay.itemAt(i).widget()
-            if w is not None and not isinstance(w, LocalPluginRow):
+            if w is not None and not isinstance(w, LocalPluginCard):
                 empty_label = w
                 break
         if not records:
