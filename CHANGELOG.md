@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.13] - 2026-11-11
 
 ### Changed
 
@@ -13,6 +13,10 @@
 - Each local plugin on the Plugins page is now a card with the same frame as the marketplace's, so one plugin is not mistaken for the next. The card shows the icon at marketplace size, the name with its version and a coloured state label (Running, Disabled, Load failed, Not loaded), and the author and description underneath. **Reload** and **Remove** sit in one row with icons, followed by a divider and the on/off switch at the right edge, centred in the card and lined up from card to card; they used to be stacked in two uneven rows with the switch's own "On/Off" text. **Remove** is red. A plugin that failed to load shows the first line of its error under its name; it used to land in front of the icon. The list keeps scrolling on its own when many plugins are installed, with the warning above it and the Import, Open folder and Rescan buttons below it staying in place.
 - Japanese language pack 1.0.8 translates the new messages.
 - The project moved from `Carlown/FlowBench` to `Flowbench-Org/FlowBench`. The update check, the plugin index and plugin downloads (GitHub and jsDelivr), install statistics, publishing and unpublishing, the plugin index's homepages and the README links now use the new address directly instead of relying on GitHub's redirect from the old one. The official plugins are still published by the `Carlown` account, including entries from an older offline copy of the index.
+
+### Verified
+
+- Ran the full test suite and looked at the Plugins page in Chinese and English, light and dark themes, at 900 and 640 px wide, with running, disabled, failed and not-loaded plugins; with 30 plugins the list scrolled to the last card while the buttons below stayed put. Covered the cards, the action row's alignment, the error line, the switch, incremental refresh, scrolling and theme colours with automated tests.
 
 ## [1.2.12] - 2026-11-10
 
