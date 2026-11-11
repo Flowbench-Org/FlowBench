@@ -831,7 +831,7 @@ class LocalPluginsPage(QWidget):
 class PluginMarketPage(QWidget):
     """插件市场浏览页。"""
 
-    _MAX_SEARCH_HISTORY = 5
+    _MAX_SEARCH_HISTORY = settings.SEARCH_HISTORY_LIMIT
     _MAX_HOT_SEARCHES = 5
 
     # 跨线程信号：下架流程

@@ -257,6 +257,24 @@ class PopularSearchPanelTests(unittest.TestCase):
         self.assertTrue(self.page.historyHost.isVisible())
         self.assertTrue(opened(), (panel.height(), panel.sizeHint().height()))
 
+    def test_six_searches_are_kept_in_two_full_rows(self):
+        self.assertEqual(settings.SEARCH_HISTORY_LIMIT, 6)
+        for term in ("a1", "b2", "c3", "d4", "e5", "f6", "g7"):
+            self.page._commit_search(term)
+        newest = ["g7", "f6", "e5", "d4", "c3", "b2"]          # "a1" was pushed out
+        self.assertEqual(self.page._search_history, newest)
+        self.assertEqual(settings.plugin_market_search_history, newest)
+        self.page._show_search_suggestions()
+        shown = [(term_btn.property("searchTerm"), self.page.historyLay.getItemPosition(
+                     self.page.historyLay.indexOf(row))[:2])
+                 for row, term_btn, _delete in self.page._history_rows if not row.isHidden()]
+        self.assertEqual(shown, [(term, (1 + i // 3, i % 3)) for i, term in enumerate(newest)])
+
+    def test_saved_settings_keep_six_searches(self):
+        raw = {"plugin_market_search_history": ["a", "b", "c", "d", "e", "f", "g", "a"]}
+        clean = type(settings)._sanitize_loaded_data(raw)
+        self.assertEqual(clean["plugin_market_search_history"], ["a", "b", "c", "d", "e", "f"])
+
     def test_clicking_a_popular_search_finds_that_plugin(self):
         self.page._on_index(self.entries, False)
         self.page._on_install_counts({"mid.py": 7})

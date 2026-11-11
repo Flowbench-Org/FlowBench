@@ -10,6 +10,8 @@ import time
 class AppSettings:
     BACKUP_SCHEMA = "flowbench.settings.backup"
     BACKUP_SCHEMA_VERSION = 1
+    # 插件市场搜索历史最多保留的条数（插件页每行 3 个，正好两行）。
+    SEARCH_HISTORY_LIMIT = 6
 
     # 仅这些非敏感偏好可以进入可分享的设置备份。授权目标、上次压测目标、
     # GitHub Token、插件私有数据和搜索历史等运行状态一律不会导出或导入。
@@ -146,7 +148,7 @@ class AppSettings:
         if type(raw.get("plugin_data", {})) is not dict:
             clean["plugin_data"] = {}
 
-        # 字符串列表配置去掉损坏条目并去重，搜索历史与市场 UI 一致保留 5 条。
+        # 字符串列表配置去掉损坏条目并去重，搜索历史与市场 UI 一致保留 SEARCH_HISTORY_LIMIT 条。
         for key in ("plugins_disabled", "plugin_market_search_history",
                     "plugin_market_favorites"):
             value = raw.get(key, cls.DEFAULTS[key])
@@ -158,7 +160,7 @@ class AppSettings:
                 if type(item) is str and item and item not in items:
                     items.append(item)
             if key == "plugin_market_search_history":
-                items = items[:5]
+                items = items[:cls.SEARCH_HISTORY_LIMIT]
             clean[key] = items
 
         authorized = raw.get("authorized", cls.DEFAULTS["authorized"])
