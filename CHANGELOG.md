@@ -2,14 +2,38 @@
 
 ## [Unreleased]
 
+### Added
+
+- The Monitor page can now show a server agent instead of this PC: pick it under **Source** at the top right. Its CPU usage, memory, network download and upload, TCP connections and processes appear in the same cards and charts as the local ones, with the same time windows, pause, clear and CSV export. The servers come from the control channel set on the Server Agents page (a Hub or the MQTT relay), and offline servers are marked. This PC keeps being recorded while a server is shown.
+- Server agents sample CPU, memory, network, TCP connections and processes once a second and send the last 15 seconds with every heartbeat, which now comes every 2 seconds (`metrics_interval`, default 2; `"metrics": false` turns it off and brings back the 10-second heartbeat). Because each heartbeat repeats the recent samples, the desktop keeps one point per second when a heartbeat or a poll is missed, and drops the repeats. On Linux the agent reads `/proc`, so no new package is needed; the network figures leave out the loopback interface. The Windows agent uses psutil, now bundled into `FlowBench-Agent.exe`. The samples travel inside the heartbeat, so an existing Hub passes them on without being updated.
+- An agent deployed before this version does not send these figures; the Monitor page says so and asks to generate the node again and replace the agent on the server. Waiting for the first data, an offline server (the last data received stays on screen) and an unreachable control channel are explained under the toolbar too.
+
+### Changed
+
+- The three node bundles (existing Hub, all-in-one and MQTT relay) take the Linux agent's files from one list, which gained `agent/sysmetrics.py`. A test checks that this list, `FlowBench.spec` and `Agent.spec` cover every module the agent imports, and that each extracted bundle starts on its own.
+- Japanese language pack 1.0.9 translates the new messages.
+
+### Verified
+
+- Ran a real Hub and agent process on Linux and read them with the desktop's client: one sample per second arrived without gaps or repeats, and the `/proc` readings matched psutil (memory 81.3 % in both, TCP connections 73 against 74, processes 250 against 249). The relay path was checked with a real signed status message and the desktop's message handler, not against the public broker. Looked at the Monitor page in Chinese and English, light and dark, with a live server, an older agent and no servers.
+
+## [1.2.13] - 2026-11-11
+
 ### Changed
 
 - The sidebar name bubble has no shadow any more, just its thin outline.
 - Messages at the top of the window (InfoBars) now wrap by their real width, breaking long web addresses after a "/", so a long message no longer runs past the window edge and hides its close button. qfluentwidgets wrapped them by character count, which is about twice too wide for Chinese and cannot break an address.
 - A failed **Check for Updates** says why in a short sentence (GitHub is limiting requests, no connection, or an unexpected reply) instead of the raw error with its URL, which is kept in the tooltip. The **Open release page** link is part of the message from the start, so the message is sized and placed with it.
 - When the GitHub API has used up its hourly limit of 60 requests, the update check reads the newest version from the release page instead, so it still finds a new version; the update then opens the release page in the browser, because only the API lists the installer.
-- Japanese language pack 1.0.6 translates the new messages.
+- When popular searches have no install counts yet, the panel now says that jsDelivr's statistics lag about two days instead of just "No install stats yet", which looked broken right after installing a plugin; the tooltip explains where the counts come from. jsDelivr's public data was two days behind when checked.
+- The Plugins page keeps the last six searches instead of five, filling both rows of three in the search history.
+- Each local plugin on the Plugins page is now a card with the same frame as the marketplace's, so one plugin is not mistaken for the next. The card shows the icon at marketplace size, the name with its version and a coloured state label (Running, Disabled, Load failed, Not loaded), and the author and description underneath. **Reload** and **Remove** sit in one row with icons, followed by a divider and the on/off switch at the right edge, centred in the card and lined up from card to card; they used to be stacked in two uneven rows with the switch's own "On/Off" text. **Remove** is red. A plugin that failed to load shows the first line of its error under its name; it used to land in front of the icon. The list keeps scrolling on its own when many plugins are installed, with the warning above it and the Import, Open folder and Rescan buttons below it staying in place.
+- Japanese language pack 1.0.8 translates the new messages.
 - The project moved from `Carlown/FlowBench` to `Flowbench-Org/FlowBench`. The update check, the plugin index and plugin downloads (GitHub and jsDelivr), install statistics, publishing and unpublishing, the plugin index's homepages and the README links now use the new address directly instead of relying on GitHub's redirect from the old one. The official plugins are still published by the `Carlown` account, including entries from an older offline copy of the index.
+
+### Verified
+
+- Ran the full test suite and looked at the Plugins page in Chinese and English, light and dark themes, at 900 and 640 px wide, with running, disabled, failed and not-loaded plugins; with 30 plugins the list scrolled to the last card while the buttons below stayed put. Covered the cards, the action row's alignment, the error line, the switch, incremental refresh, scrolling and theme colours with automated tests.
 
 ## [1.2.12] - 2026-11-10
 

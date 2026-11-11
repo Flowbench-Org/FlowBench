@@ -23,6 +23,7 @@ import ssl
 
 from agent.relay import (parse_relay_url, relay_topic, sign_message,
                          verify_message)
+from agent.sysmetrics import SystemSampler
 from agent.transport import compact_json, decode_json, endpoint
 from agent.worker import HeadlessStressJob
 
@@ -31,6 +32,9 @@ DEFAULTS = {
     "poll_interval": 2.0, "heartbeat_interval": 10.0, "job_heartbeat_interval": 2.0, "request_timeout": 8.0,
     "max_rate": 100.0, "max_duration": 300, "max_threads": 32,
     "max_packet_size": 64 * 1024, "allowed_protocols": ["HTTP", "HTTPS", "TCP"],
+    # CPU, memory, network, TCP connections and processes for the desktop's
+    # Monitor page; sampled every second and sent at least this often.
+    "metrics": True, "metrics_interval": 2.0,
 }
 SUPPORTED_PROTOCOLS = {"HTTP", "HTTPS", "TCP"}
 
@@ -154,7 +158,57 @@ def load_config(path: Path):
     if not isinstance(raw_protocols, (list, tuple, set)):
         raw_protocols = DEFAULTS["allowed_protocols"]
     merged["allowed_protocols"] = [str(x).upper() for x in raw_protocols]
+    merged["metrics"] = merged.get("metrics", True) is not False
+    try:
+        metrics_interval = float(merged.get("metrics_interval", DEFAULTS["metrics_interval"]))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("metrics_interval must be a number of seconds") from exc
+    if not (math.isfinite(metrics_interval) and 1 <= metrics_interval <= 60):
+        raise ValueError("metrics_interval must be between 1 and 60 seconds")
+    merged["metrics_interval"] = metrics_interval
     return merged
+
+
+def heartbeat_interval(config, event, metrics_on=False):
+    """Seconds between heartbeats: faster during a job and while sending metrics."""
+    interval = float(config.get("heartbeat_interval", 10))
+    if str((event or {}).get("state")) in {"starting", "running", "stopping"}:
+        interval = float(config.get("job_heartbeat_interval", 2))
+    if metrics_on:
+        interval = min(interval, float(config.get("metrics_interval", 2)))
+    return interval
+
+
+def start_sampler(config):
+    """The system-metrics sampler for this agent, or None when metrics are off."""
+    if not config.get("metrics", True):
+        return None
+    return SystemSampler.create().start()
+
+
+def with_system(event, sampler):
+    """The heartbeat event plus the latest system samples.
+
+    The samples ride inside the event so an older Hub, which stores whatever
+    the heartbeat carries, passes them on to the desktop unchanged.
+    """
+    payload = dict(event or {})
+    if sampler is not None:
+        payload["system"] = sampler.snapshot()
+    return payload
+
+
+def relay_status_message(secret, agent_id, name, agent_metadata, online, event):
+    """A signed status message for the MQTT relay (retained, one per agent)."""
+    return sign_message(secret, {
+        "type": "status",
+        "agent_id": agent_id,
+        "name": name,
+        "metadata": agent_metadata,
+        "online": bool(online),
+        "last_seen": time.time(),
+        "last_event": dict(event or {}),
+    })
 
 
 def validate_job(raw: dict, config: dict):
@@ -295,17 +349,13 @@ def run_relay_agent(config, config_path):
     processed_ids = set()
     processed_order = []
     agent_metadata = metadata()
+    sampler = start_sampler(config)
 
     def status_message(online=True, event=None):
-        return sign_message(secret, {
-            "type": "status",
-            "agent_id": agent_id,
-            "name": agent_name,
-            "metadata": agent_metadata,
-            "online": bool(online),
-            "last_seen": time.time(),
-            "last_event": dict(event if event is not None else runtime.current_event()),
-        })
+        event = dict(event if event is not None else runtime.current_event())
+        if online:
+            event = with_system(event, sampler)
+        return relay_status_message(secret, agent_id, agent_name, agent_metadata, online, event)
 
     client = mqtt.Client(
         mqtt.CallbackAPIVersion.VERSION2,
@@ -393,13 +443,12 @@ def run_relay_agent(config, config_path):
 
             now = time.monotonic()
             event = runtime.current_event()
-            heartbeat_interval = float(config.get("heartbeat_interval", 10))
-            if str(event.get("state")) in {"starting", "running", "stopping"}:
-                heartbeat_interval = float(config.get("job_heartbeat_interval", 2))
-            if now - last_heartbeat >= heartbeat_interval:
+            if now - last_heartbeat >= heartbeat_interval(config, event, sampler is not None):
                 publish_status(event)
                 last_heartbeat = now
     finally:
+        if sampler is not None:
+            sampler.stop()
         if connected.is_set():
             client.publish(
                 status_topic,
@@ -422,6 +471,7 @@ def run_agent(config, config_path):
         cursor = 0
     hub = HubClient(config, config_path)
     runtime = AgentRuntime(config)
+    sampler = start_sampler(config)
     registered = False
     last_heartbeat = 0.0
     while True:
@@ -431,11 +481,8 @@ def run_agent(config, config_path):
                 hub.register(metadata()); registered = True
                 print(f"[agent] online as {config['agent_id']} (hub={config['hub_url']})", flush=True)
             event = runtime.current_event()
-            heartbeat_interval = float(config.get("heartbeat_interval", 10))
-            if str(event.get("state")) in {"starting", "running", "stopping"}:
-                heartbeat_interval = float(config.get("job_heartbeat_interval", 2))
-            if now - last_heartbeat >= heartbeat_interval:
-                hub.heartbeat({"cursor": cursor, **event})
+            if now - last_heartbeat >= heartbeat_interval(config, event, sampler is not None):
+                hub.heartbeat(with_system({"cursor": cursor, **event}, sampler))
                 last_heartbeat = now
             item = hub.poll(cursor)
             seq = int(item.get("seq", cursor))

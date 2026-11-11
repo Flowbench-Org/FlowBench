@@ -21,6 +21,7 @@ a = Analysis(
         ('agent/worker.py', 'agent_template/linux/agent'),
         ('agent/transport.py', 'agent_template/linux/agent'),
         ('agent/relay.py', 'agent_template/linux/agent'),
+        ('agent/sysmetrics.py', 'agent_template/linux/agent'),
         ('agent/__init__.py', 'agent_template/linux/agent'),
     ],
     hiddenimports=['shiboken6.Shiboken'],

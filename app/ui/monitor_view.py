@@ -1,5 +1,10 @@
-"""监控面板：资源卡片、可暂停实时曲线与采样历史导出。"""
+"""监控面板：资源卡片、可暂停实时曲线与采样历史导出。
+
+“监控对象”可以在本机和服务器节点之间切换：服务器节点每秒采样一次 CPU、
+内存、网络、TCP 连接数和进程数，随心跳发回，显示方式与本机相同。
+"""
 import csv
+import re
 from collections import deque
 from datetime import datetime
 
@@ -8,9 +13,11 @@ from PySide6.QtWidgets import (QFileDialog, QGridLayout, QHBoxLayout, QLabel,
                                QProgressBar, QVBoxLayout, QWidget)
 from qfluentwidgets import (CaptionLabel, ComboBox, InfoBar, PushButton,
                             ScrollArea, SimpleCardWidget, StrongBodyLabel,
-                            SubtitleLabel, isDarkTheme, qconfig)
+                            SubtitleLabel, isDarkTheme, qconfig,
+                            setCustomStyleSheet)
 
 from app.services.monitor import monitor
+from app.services.remote_monitor import remote_monitor
 from app.ui.charts import ACCENT, GREEN, PURPLE, HoverChart
 from app.ui.i18n import L
 
@@ -125,6 +132,17 @@ class PercentTile(SimpleCardWidget):
             }}
         """)
 
+    def reset(self):
+        """没有数据时显示占位符。"""
+        self._cur_color = self._base_color
+        self.valueLabel.setText("-- %")
+        self.valueLabel.setStyleSheet(
+            f"font-size:36px; font-weight:700; color:{self._base_color}; background:transparent;")
+        self.bar.setValue(0)
+        self._apply_bar_style(self._base_color)
+        self.detailLabel.setText("")
+        self.detailLabel.setVisible(False)
+
     def set_percent(self, pct: float, detail: str = ""):
         pct = max(0.0, min(100.0, pct))
         c = _usage_color(pct)
@@ -142,9 +160,12 @@ class MonitorView(ScrollArea):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("monitorView")
-        self._samples = deque(maxlen=MAX_WINDOW_POINTS)
+        self._samples = deque(maxlen=MAX_WINDOW_POINTS)   # 本机采样，切到服务器时也继续记录
         self._window_points = WINDOW_POINTS
         self._plot_paused = False
+        self._source = ""            # 当前监控对象："" 为本机，否则为服务器节点 ID
+        self._source_items = []
+        self._updating_sources = False
         self.view = QWidget(self)
         self.setWidget(self.view)
         self.setWidgetResizable(True)
@@ -158,8 +179,18 @@ class MonitorView(ScrollArea):
         header = QVBoxLayout()
         header.setSpacing(8)
         title_row = QHBoxLayout()
+        title_row.setSpacing(8)
         title_row.addWidget(SubtitleLabel(L("监控面板", "Monitor"), self.view))
         title_row.addStretch(1)
+        title_row.addWidget(CaptionLabel(L("监控对象", "Source"), self.view))
+        self.sourceCombo = ComboBox(self.view)
+        self.sourceCombo.setMinimumWidth(220)
+        self.sourceCombo.setToolTip(L(
+            "选择监控本机还是某台服务器节点。服务器节点列表来自“服务器节点”页的控制通道。",
+            "Monitor this PC or a server agent. Servers come from the control channel "
+            "on the Server Agents page."))
+        self.sourceCombo.currentIndexChanged.connect(self._on_source_changed)
+        title_row.addWidget(self.sourceCombo)
         header.addLayout(title_row)
         action_row = QHBoxLayout()
         action_row.setSpacing(8)
@@ -183,6 +214,11 @@ class MonitorView(ScrollArea):
         action_row.addWidget(self.exportBtn)
         action_row.addStretch(1)
         header.addLayout(action_row)
+        # 服务器的在线状态、等待数据、旧版节点等提示；本机且无提示时隐藏
+        self.sourceStatus = CaptionLabel("", self.view)
+        self.sourceStatus.setWordWrap(True)
+        self.sourceStatus.hide()
+        header.addWidget(self.sourceStatus)
         root.addLayout(header)
 
         grid = QGridLayout()
@@ -233,6 +269,9 @@ class MonitorView(ScrollArea):
         root.addWidget(net_card, 1)
 
         monitor.updated.connect(self._on_update)
+        remote_monitor.changed.connect(self._on_remote_changed)
+        self._sync_sources()
+        self._update_source_status()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -248,10 +287,36 @@ class MonitorView(ScrollArea):
             grid.addWidget(tile, row, column)
 
     def _on_update(self, d):
-        cpu = float(d["cpu"])
-        mem_pct = float(d["mem_percent"])
-        mem_used = float(d["mem_used_gb"])
-        mem_total = float(d["mem_total_gb"])
+        try:
+            import psutil
+            process_count = len(psutil.pids())
+        except Exception:
+            process_count = -1
+        # 无论曲线是否暂停、当前看的是不是本机，本机采样都持续写入固定长度缓存。
+        sample = {
+            "timestamp": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "cpu_percent": float(d["cpu"]),
+            "memory_percent": float(d["mem_percent"]),
+            "memory_used_gb": float(d["mem_used_gb"]),
+            "memory_total_gb": float(d["mem_total_gb"]),
+            "download_kbs": float(d["down_kbs"]),
+            "upload_kbs": float(d["up_kbs"]),
+            "tcp_connections": int(d["tcp_conns"]),
+            "process_count": process_count,
+        }
+        self._samples.append(sample)
+        if self._source:
+            return
+        self._show_sample(sample)
+        if not self._plot_paused:
+            self._refresh_plots()
+
+    def _show_sample(self, sample):
+        """把一条采样（本机或服务器）显示到四张卡片上。"""
+        cpu = float(sample["cpu_percent"])
+        mem_pct = float(sample["memory_percent"])
+        mem_used = float(sample["memory_used_gb"])
+        mem_total = float(sample["memory_total_gb"])
         mem_free = mem_total - mem_used
 
         self.tCpu.set_percent(cpu, L(
@@ -262,32 +327,139 @@ class MonitorView(ScrollArea):
             f"{mem_used:.1f} / {mem_total:.1f} GB  剩余 {mem_free:.1f} GB",
             f"{mem_used:.1f} / {mem_total:.1f} GB  {mem_free:.1f} GB free"
         ))
-        tcp_conns = int(d["tcp_conns"])
+        tcp_conns = int(sample["tcp_connections"])
         self.tTcp.set(str(tcp_conns) if tcp_conns >= 0 else L("无权限", "N/A"))
-        try:
-            import psutil
-            process_count = len(psutil.pids())
-        except Exception:
-            process_count = -1
+        process_count = int(sample["process_count"])
         self.tProc.set(str(process_count) if process_count >= 0 else "--")
 
-        # 无论曲线是否暂停，采样都持续写入固定长度缓存。
-        self._samples.append({
-            "timestamp": datetime.now().astimezone().isoformat(timespec="seconds"),
-            "cpu_percent": cpu,
-            "memory_percent": mem_pct,
-            "memory_used_gb": mem_used,
-            "memory_total_gb": mem_total,
-            "download_kbs": float(d["down_kbs"]),
-            "upload_kbs": float(d["up_kbs"]),
-            "tcp_connections": tcp_conns,
-            "process_count": process_count,
-        })
-        if not self._plot_paused:
-            self._refresh_plots()
+    def _show_empty(self):
+        self.tCpu.reset()
+        self.tMem.reset()
+        self.tTcp.set("--")
+        self.tProc.set("--")
+
+    def _current_samples(self):
+        if self._source:
+            return remote_monitor.samples(self._source)
+        return list(self._samples)
+
+    def _show_current(self):
+        samples = self._current_samples()
+        if samples:
+            self._show_sample(samples[-1])
+        else:
+            self._show_empty()
+
+    # ---------- 监控对象：本机 / 服务器节点 ----------
+
+    def _sync_sources(self):
+        """按最新的服务器节点列表重建“监控对象”下拉框，保留当前选择。"""
+        agents = remote_monitor.agents()
+        names = [agent["name"] for agent in agents]
+        items = [("", L("本机", "This PC"))]
+        for agent in agents:
+            label = agent["name"]
+            if names.count(label) > 1:
+                label = f"{label} ({agent['agent_id']})"
+            if not agent["online"]:
+                label = L(f"{label}（离线）", f"{label} (offline)")
+            items.append((agent["agent_id"], label))
+        if items == self._source_items:
+            return
+        self._source_items = items
+        ids = [agent_id for agent_id, _label in items]
+        self._updating_sources = True
+        try:
+            self.sourceCombo.clear()
+            for agent_id, label in items:
+                self.sourceCombo.addItem(label, userData=agent_id)
+            self.sourceCombo.setCurrentIndex(ids.index(self._source) if self._source in ids else 0)
+        finally:
+            self._updating_sources = False
+        if self._source not in ids:          # 这台服务器已从节点列表中移除
+            self._set_source("")
+
+    def _on_source_changed(self, index: int):
+        if self._updating_sources:
+            return
+        self._set_source(str(self.sourceCombo.itemData(index) or ""))
+
+    def _set_source(self, agent_id: str):
+        self._source = agent_id
+        remote_monitor.watching = agent_id
+        if agent_id:
+            remote_monitor.request_refresh()
+        # 换了对象，退出手动缩放，并立即显示它的数据（暂停时也一样）。
+        self.cpuPlot.set_window_points(self._window_points)
+        self.netPlot.set_window_points(self._window_points)
+        self._show_current()
+        self._refresh_plots()
+        self._update_source_status()
+
+    def _on_remote_changed(self):
+        self._sync_sources()
+        self._update_source_status()
+        if self._source:
+            self._show_current()
+            if not self._plot_paused:
+                self._refresh_plots()
+
+    def _source_status(self):
+        """(提示文字, 是否需要提醒) —— 显示在工具栏下方。"""
+        if not self._source:
+            if not remote_monitor.agents() and remote_monitor.connection in {"unknown", "unconfigured"}:
+                return L(
+                    "在“服务器节点”页连接 Hub 或中继后，可以在右上角“监控对象”里切换到服务器，"
+                    "查看它的 CPU、内存和网络。",
+                    "Connect a Hub or relay on the Server Agents page, then pick a server under "
+                    "Source to see its CPU, memory and network."), False
+            return "", False
+        info = remote_monitor.agent(self._source)
+        if info is None:
+            return "", False
+        if remote_monitor.connection == "error":
+            return L(f"无法连接控制通道：{remote_monitor.connection_error}",
+                     f"Cannot reach the control channel: {remote_monitor.connection_error}"), True
+        if info["status"] == "unsupported":
+            return L(
+                "这台服务器上的节点版本较旧，不会上报 CPU、内存和网络数据。请在“服务器节点”页重新生成"
+                "节点包，替换服务器上的节点文件并重启节点。",
+                "The agent on this server is an older version that does not report CPU, memory or "
+                "network data. Generate the node again on the Server Agents page, replace the agent "
+                "files on the server and restart the agent."), True
+        if info["status"] == "unavailable":
+            return L(f"这台服务器读不到系统数据：{info['error']}",
+                     f"This server cannot read its system data: {info['error']}"), True
+        if not info["samples"]:
+            return L("正在等待服务器节点上报数据…", "Waiting for the server agent to report…"), False
+        if not info["online"]:
+            return L("服务器节点已离线，下面是最后收到的数据。",
+                     "The server agent is offline; showing the last data received."), True
+        host = info["hostname"] or info["name"]
+        return L(f"在线：{host}。每秒采样一次，约每 2 秒刷新。",
+                 f"Online: {host}. Sampled every second, refreshed about every 2 seconds."), False
+
+    def _update_source_status(self):
+        text, warn = self._source_status()
+        self.sourceStatus.setText(text)
+        self.sourceStatus.setVisible(bool(text))
+        if warn:
+            setCustomStyleSheet(self.sourceStatus,
+                                "FluentLabelBase{color:#9d5d00;}", "FluentLabelBase{color:#fce100;}")
+        else:
+            setCustomStyleSheet(self.sourceStatus, "", "")
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        remote_monitor.page_visible = True
+        remote_monitor.request_refresh()
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        remote_monitor.page_visible = False
 
     def _refresh_plots(self):
-        samples = list(self._samples)[-self._window_points:]
+        samples = self._current_samples()[-self._window_points:]
         self.cpuPlot.set_data({
             self._cpu_name: [s["cpu_percent"] for s in samples],
             self._mem_name: [s["memory_percent"] for s in samples],
@@ -307,7 +479,10 @@ class MonitorView(ScrollArea):
             self._refresh_plots()
 
     def _clear_history(self):
-        self._samples.clear()
+        if self._source:
+            remote_monitor.clear(self._source)
+        else:
+            self._samples.clear()
         # 清空同时退出手动缩放，确保下一条采样能立即重新出现在视野中。
         self.cpuPlot.set_window_points(self._window_points)
         self.netPlot.set_window_points(self._window_points)
@@ -324,7 +499,7 @@ class MonitorView(ScrollArea):
         self._refresh_plots()
 
     def _export_csv(self):
-        samples = list(self._samples)
+        samples = self._current_samples()
         if not samples:
             InfoBar.warning(
                 L("暂无数据", "No data"),
@@ -332,7 +507,12 @@ class MonitorView(ScrollArea):
                 parent=self.window(),
             )
             return
-        default_name = "flowbench-monitor-" + datetime.now().strftime("%Y%m%d-%H%M%S") + ".csv"
+        source = ""
+        if self._source:
+            info = remote_monitor.agent(self._source) or {}
+            source = re.sub(r"[^\w.-]+", "_", str(info.get("name") or self._source)).strip("_") + "-"
+        default_name = ("flowbench-monitor-" + source
+                        + datetime.now().strftime("%Y%m%d-%H%M%S") + ".csv")
         path, _ = QFileDialog.getSaveFileName(
             self, L("导出监控数据", "Export monitoring data"), default_name,
             L("CSV 文件 (*.csv)", "CSV files (*.csv)"),

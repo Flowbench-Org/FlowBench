@@ -231,7 +231,8 @@ class PopularSearchPanelTests(unittest.TestCase):
         self.fetch_counts.assert_called_once()
         self.assertEqual(self.hot_rows(), [("新插件", ""), ("中间插件", ""), ("外部插件", ""),
                                            ("旧插件", "")])   # the incompatible one is left out
-        self.assertEqual(self.page.hotNote.text(), "暂无安装统计，按上架时间排列")
+        self.assertEqual(self.page.hotNote.text(), "安装统计约有两天延迟，暂按上架时间排列")
+        self.assertIn("两天", self.page.hotNote.toolTip())
 
     def test_real_installs_rank_first_and_are_shown(self):
         self.page._on_index(self.entries, False)
@@ -240,6 +241,7 @@ class PopularSearchPanelTests(unittest.TestCase):
         self.assertEqual(self.hot_rows(), [("旧插件", "1,520 次安装"), ("中间插件", "1 次安装"),
                                            ("新插件", ""), ("外部插件", "")])
         self.assertEqual(self.page.hotNote.text(), "按近 30 天安装次数")
+        self.assertIn("jsDelivr", self.page.hotNote.toolTip())
 
     def test_popular_searches_stay_visible_next_to_the_history(self):
         self.page._on_index(self.entries, False)
@@ -254,6 +256,24 @@ class PopularSearchPanelTests(unittest.TestCase):
         self.assertTrue(self.page.hotHost.isVisible())
         self.assertTrue(self.page.historyHost.isVisible())
         self.assertTrue(opened(), (panel.height(), panel.sizeHint().height()))
+
+    def test_six_searches_are_kept_in_two_full_rows(self):
+        self.assertEqual(settings.SEARCH_HISTORY_LIMIT, 6)
+        for term in ("a1", "b2", "c3", "d4", "e5", "f6", "g7"):
+            self.page._commit_search(term)
+        newest = ["g7", "f6", "e5", "d4", "c3", "b2"]          # "a1" was pushed out
+        self.assertEqual(self.page._search_history, newest)
+        self.assertEqual(settings.plugin_market_search_history, newest)
+        self.page._show_search_suggestions()
+        shown = [(term_btn.property("searchTerm"), self.page.historyLay.getItemPosition(
+                     self.page.historyLay.indexOf(row))[:2])
+                 for row, term_btn, _delete in self.page._history_rows if not row.isHidden()]
+        self.assertEqual(shown, [(term, (1 + i // 3, i % 3)) for i, term in enumerate(newest)])
+
+    def test_saved_settings_keep_six_searches(self):
+        raw = {"plugin_market_search_history": ["a", "b", "c", "d", "e", "f", "g", "a"]}
+        clean = type(settings)._sanitize_loaded_data(raw)
+        self.assertEqual(clean["plugin_market_search_history"], ["a", "b", "c", "d", "e", "f"])
 
     def test_clicking_a_popular_search_finds_that_plugin(self):
         self.page._on_index(self.entries, False)

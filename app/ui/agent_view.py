@@ -33,6 +33,7 @@ from qfluentwidgets import (BodyLabel, CaptionLabel, CheckBox, ComboBox, FluentI
                             getFont, isDarkTheme, themeColor, Theme)
 
 from app.services.agent_control import ControllerClient, RelayControllerClient
+from app.services.remote_monitor import remote_monitor
 from app.services.auth import add_authorized, build_http_url, is_authorized, normalize_host
 from app.services.settings import settings
 from app.ui.disclaimer import AuthDialog
@@ -41,6 +42,16 @@ from app.ui.stress_view import HIGH_RATE, MiniStat, fmt_bytes
 
 
 DEFAULT_AGENT_RELAY = "mqtt://broker.hivemq.com:8000"
+# What a Linux server node runs: server_agent.py and the agent package it
+# imports. Every node bundle and FlowBench.spec ship exactly these files.
+LINUX_AGENT_FILES = (
+    "server_agent.py",
+    "agent/__init__.py",
+    "agent/worker.py",
+    "agent/transport.py",
+    "agent/relay.py",
+    "agent/sysmetrics.py",
+)
 
 
 def _as_dict(value) -> dict:
@@ -536,6 +547,8 @@ class AgentView(ScrollArea):
         self._poll_timer.setInterval(2000)
         self._poll_timer.timeout.connect(self._poll_remote_status)
         self._poll_timer.start()
+        # The Monitor page asks for a list when it opens or switches to a server.
+        remote_monitor.refresh_requested.connect(self._poll_remote_status)
 
         root = QVBoxLayout(self.view)
         root.setContentsMargins(28, 22, 28, 28)
@@ -754,12 +767,15 @@ class AgentView(ScrollArea):
         ))
 
     def _poll_remote_status(self):
-        """Keep the selected job visible on the Stress Test page."""
-        if self._poll_in_flight or not self._selected_agents_ids():
+        """Keep the selected job visible on the Stress Test page, and feed the
+        Monitor page while it is open or showing a server."""
+        if self._poll_in_flight or not (self._selected_agents_ids()
+                                        or remote_monitor.wants_updates()):
             return
         try:
             client = self._client()
         except Exception:
+            remote_monitor.set_connection("unconfigured")
             return
 
         self._poll_in_flight = True
@@ -907,9 +923,9 @@ class AgentView(ScrollArea):
         hub_exe = self._hub_exe_path()
         hub_source = linux_root / "agent" / "hub.py"
         transport_source = linux_root / "agent" / "transport.py"
-        relay_source = linux_root / "agent" / "relay.py"
-        missing = [path for path in (agent_exe, hub_exe, hub_source, transport_source, relay_source,
-                                     linux_root / "server_agent.py") if not path.is_file()]
+        agent_sources = [(linux_root / name, name) for name in LINUX_AGENT_FILES]
+        missing = [path for path in [agent_exe, hub_exe, hub_source]
+                   + [source for source, _name in agent_sources] if not path.is_file()]
         if missing:
             raise FileNotFoundError(L("安装包缺少服务端文件，请重新构建主程序。",
                                       "The installed app is missing server payload files; rebuild the main app."))
@@ -1026,11 +1042,8 @@ exec python3 agent/server_agent.py --config agent/agent.json
                 bundle.writestr("linux/hub/hub.json", hub_json)
                 bundle.writestr("linux/hub/cert.pem", cert_pem)
                 bundle.writestr("linux/hub/key.pem", key_pem)
-                bundle.write(linux_root / "server_agent.py", "linux/agent/server_agent.py")
-                bundle.write(linux_root / "agent" / "worker.py", "linux/agent/agent/worker.py")
-                bundle.write(transport_source, "linux/agent/agent/transport.py")
-                bundle.write(relay_source, "linux/agent/agent/relay.py")
-                bundle.write(linux_root / "agent" / "__init__.py", "linux/agent/agent/__init__.py")
+                for source, name in agent_sources:
+                    bundle.write(source, f"linux/agent/{name}")
                 bundle.writestr("linux/agent/agent.json", config_json)
                 bundle.writestr("linux/agent/ca.pem", cert_pem)
                 bundle.writestr(
@@ -1077,13 +1090,7 @@ exec python3 agent/server_agent.py --config agent/agent.json
         """Create a standalone node package that uses the public MQTT relay."""
         output = Path(output).resolve()
         exe, linux_root = self._node_payload_paths()
-        source_files = [
-            linux_root / "server_agent.py",
-            linux_root / "agent" / "worker.py",
-            linux_root / "agent" / "transport.py",
-            linux_root / "agent" / "relay.py",
-            linux_root / "agent" / "__init__.py",
-        ]
+        source_files = [linux_root / name for name in LINUX_AGENT_FILES]
         missing = ([exe] if not exe.is_file() else []) + [
             path for path in source_files if not path.is_file()
         ]
@@ -1133,15 +1140,8 @@ exec python3 agent/server_agent.py --config agent/agent.json
             bundle.write(exe, "windows/FlowBench-Agent.exe")
             bundle.writestr("windows/agent.json", config_json)
             bundle.writestr("windows/start-agent.cmd", start_cmd)
-            archive_names = [
-                "linux/server_agent.py",
-                "linux/agent/worker.py",
-                "linux/agent/transport.py",
-                "linux/agent/relay.py",
-                "linux/agent/__init__.py",
-            ]
-            for path, archive_name in zip(source_files, archive_names):
-                bundle.write(path, archive_name)
+            for path, name in zip(source_files, LINUX_AGENT_FILES):
+                bundle.write(path, f"linux/{name}")
             bundle.writestr("linux/agent.json", config_json)
             bundle.writestr("linux/requirements.txt", "requests>=2.31\npaho-mqtt>=2.0\n")
             info = zipfile.ZipInfo("linux/start-agent.sh")
@@ -1161,13 +1161,7 @@ exec python3 agent/server_agent.py --config agent/agent.json
     def _provision_and_package(self, client, name, output):
         record = client.provision_agent(name)
         exe, linux_root = self._node_payload_paths()
-        source_files = [
-            linux_root / "server_agent.py",
-            linux_root / "agent" / "worker.py",
-            linux_root / "agent" / "transport.py",
-            linux_root / "agent" / "relay.py",
-            linux_root / "agent" / "__init__.py",
-        ]
+        source_files = [linux_root / name for name in LINUX_AGENT_FILES]
         missing = ([exe] if not exe.is_file() else []) + [path for path in source_files if not path.is_file()]
         if missing:
             raise FileNotFoundError(L("安装包缺少 Agent 文件，请重新构建主程序。",
@@ -1206,16 +1200,9 @@ exec python3 agent/server_agent.py --config agent/agent.json
                 bundle.write(exe, "windows/FlowBench-Agent.exe")
                 bundle.writestr("windows/agent.json", config_json)
                 bundle.writestr("windows/start-agent.cmd", start_cmd)
-            linux_payloads = [
-                (source_files[0], "linux/server_agent.py"),
-                (source_files[1], "linux/agent/worker.py"),
-                (source_files[2], "linux/agent/transport.py"),
-                (source_files[3], "linux/agent/relay.py"),
-                (source_files[4], "linux/agent/__init__.py"),
-            ]
-            for path, archive_name in linux_payloads:
+            for path, name in zip(source_files, LINUX_AGENT_FILES):
                 if path.is_file():
-                    bundle.write(path, archive_name)
+                    bundle.write(path, f"linux/{name}")
             bundle.writestr("linux/agent.json", config_json)
             bundle.writestr("linux/requirements.txt", "requests>=2.31\npaho-mqtt>=2.0\n")
             # Preserve the executable bit for Linux ZIP archives.
@@ -1430,6 +1417,8 @@ exec python3 agent/server_agent.py --config agent/agent.json
         self.refreshBtn.setEnabled(True)
         self.generateBtn.setEnabled(True)
         if error:
+            if action in {"list", "poll_status"}:
+                remote_monitor.set_connection("error", str(error))
             if action == "poll_status":
                 if str(error) != self._last_poll_error:
                     self._last_poll_error = str(error)
@@ -1437,6 +1426,9 @@ exec python3 agent/server_agent.py --config agent/agent.json
                 return
             self._show_error(str(error))
             return
+        if action in {"list", "poll_status"}:
+            remote_monitor.set_connection("ok")
+            remote_monitor.ingest(value or [])
         if action == "list":
             self._agents = list(value or [])
             self._updating_combo = True
