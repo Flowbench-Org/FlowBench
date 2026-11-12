@@ -564,7 +564,6 @@ class AnimatedLogo(QWidget):
         self._badge_start: Optional[float] = None
         self._badge_kind = "success"
         self._ghost = False
-        self._float = True
         self._born = now()
         self._buffer: Optional[QImage] = None
         self._particles = None
@@ -614,7 +613,17 @@ class AnimatedLogo(QWidget):
         return self._badge_start is not None
 
     def is_animating(self) -> bool:
-        return self.motion          # it floats, glows and ripples while shown
+        """Whether the next frame differs: the intro, the liquid's waves,
+        the badge popping in, or the glint that passes every 7 s.  The logo
+        itself stays still."""
+        if not self.motion:
+            return False
+        t = now()
+        if self._intro_start is not None or self._liquid is not None:
+            return True
+        if self._badge_start is not None and t - self._badge_start < 1.3:
+            return True
+        return not self._ghost and (t - self._born) % 7.0 < 1.0
 
     # -- geometry -------------------------------------------------------------
 
@@ -622,10 +631,10 @@ class AnimatedLogo(QWidget):
         h = float(self.logo_height)
         dpr = self.devicePixelRatioF() or 1.0
         w = round(h * LOGO_WIDTH / 1000.0 * dpr) / dpr       # whole pixels, like the art
-        offset = 0.0
-        if self.motion and self._float and self.intro_done():
-            offset = 2.5 * math.sin(2 * math.pi * (now() - self._born) / 5.0)
-        return QRectF((self.width() - w) / 2, (self.height() - h) / 2 + offset, w, h)
+        # Still, on whole device pixels: the art is drawn 1:1 and stays crisp.
+        x = round((self.width() - w) / 2 * dpr) / dpr
+        y = round((self.height() - h) / 2 * dpr) / dpr
+        return QRectF(x, y, w, h)
 
     # -- painting -------------------------------------------------------------
 
@@ -700,8 +709,6 @@ class AnimatedLogo(QWidget):
         strength = 1.0
         if intro is not None:
             strength = ease_out_cubic((intro - 0.7) / 0.8) if intro > 0.7 else 0.0
-        elif self.motion:
-            strength = 0.85 + 0.15 * math.sin(2 * math.pi * (t - self._born) / 4.0)
         if self._liquid is not None:
             strength *= 0.35 + 0.65 * self._level
         if strength <= 0:
