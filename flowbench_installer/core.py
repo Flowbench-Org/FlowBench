@@ -159,6 +159,21 @@ def check_target(target: Path) -> None:
             f"{target} 里已经有其他文件。请选择空文件夹或已有的 FlowBench 文件夹。")
 
 
+def free_space(target: Path) -> Optional[int]:
+    """Free bytes on the drive ``target`` would go to; None when unknown."""
+    try:
+        probe = Path(target)
+        if not probe.is_absolute():
+            return None
+        while not probe.exists():
+            if probe.parent == probe:
+                return None
+            probe = probe.parent
+        return shutil.disk_usage(probe).free
+    except (OSError, ValueError):
+        return None
+
+
 def _sibling(target: Path, kind: str) -> Path:
     return target.parent / f"{target.name}.{kind}-{secrets.token_hex(4)}"
 

@@ -493,7 +493,8 @@ class UninstallWindowTests(unittest.TestCase):
 
     def test_uninstalls_and_keeps_user_data_by_default(self):
         win = self.window()
-        self.assertEqual(win.titleLabel.text(), f"FlowBench {self.version}")
+        self.assertEqual(win.titleLabel.text(), "Uninstall FlowBench")
+        self.assertIn(self.version, win.subtitleLabel.text())
         self.assertEqual(win.uninstallButton.text(), "Uninstall")
         self.assertFalse(win.removeDataCheck.isChecked())
         self.assertIn("are kept", win.dataNote.text())
@@ -557,7 +558,8 @@ class UninstallWindowTests(unittest.TestCase):
         self.assertEqual(win.windowTitle(), "卸载 FlowBench")
         self.assertEqual(win.uninstallButton.text(), "卸载")
         self.assertIn("同时删除我的设置", win.removeDataCheck.text())
-        self.assertIn("卸载向导", win.subtitleLabel.text())
+        self.assertEqual(win.titleLabel.text(), "卸载 FlowBench")
+        self.assertIn("网络压力测试工具", win.subtitleLabel.text())
         win.close()
 
 
@@ -584,14 +586,29 @@ class SetupWindowTests(unittest.TestCase):
 
     def test_wizard_installs_and_launches(self):
         win = self.wizard()
+        self.assertIs(win.pages.currentWidget(), win.welcomePage)
+        win.startButton.click()
+        self.assertIs(win.pages.currentWidget(), win.locationPage)
         self.assertEqual(win.installButton.text(), "Install")
         win.installButton.click()
         self.assertTrue(wait_for(lambda: win.pages.currentWidget() is win.donePage, 10000))
         self.assertTrue((self.target / "FlowBench.exe").exists())
         self.assertFalse(win.doneWarnings.isVisible())
-        win.finishButton.click()
+        win.openButton.click()
         self.assertIn(("launch", str(self.target / "FlowBench.exe"), []), self.platform.calls)
         self.assertFalse(win.isVisible())
+
+    def test_finish_closes_without_opening_flowbench(self):
+        win = self.wizard()
+        win.startButton.click()
+        win.installButton.click()
+        self.assertTrue(wait_for(lambda: win.pages.currentWidget() is win.donePage, 10000))
+        finished = []
+        win.finished.connect(finished.append)
+        win.finishButton.click()
+        self.assertEqual(finished, [True])
+        self.assertFalse(win.isVisible())
+        self.assertNotIn("launch", [call[0] for call in self.platform.calls])
 
     def test_wizard_offers_update_for_existing_install(self):
         first = self.wizard()
@@ -608,9 +625,10 @@ class SetupWindowTests(unittest.TestCase):
         win = self.wizard()
         asked = []
         win.ask_retry = lambda title, text: asked.append(title) or False
+        win.startButton.click()
         win.installButton.click()
         self.assertEqual(asked, ["FlowBench is running"])
-        self.assertIs(win.pages.currentWidget(), win.welcomePage)
+        self.assertIs(win.pages.currentWidget(), win.locationPage)
         self.assertFalse(self.target.exists())
         win.close()
 
@@ -637,10 +655,11 @@ class SetupWindowTests(unittest.TestCase):
         win = self.wizard()
         warned = []
         win._warn = lambda title, text: warned.append(text)
+        win.startButton.click()
         win.pathEdit.setText(str(foreign))
         win.installButton.click()
         self.assertEqual(len(warned), 1)
-        self.assertIs(win.pages.currentWidget(), win.welcomePage)
+        self.assertIs(win.pages.currentWidget(), win.locationPage)
         win.close()
 
     def test_update_mode_waits_installs_relaunches_and_closes(self):

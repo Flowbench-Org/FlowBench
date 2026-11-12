@@ -423,6 +423,21 @@ def system_prefers_chinese() -> bool:
     return lang.lower().startswith("zh")
 
 
+def animations_enabled() -> bool:
+    """Windows' "Animation effects" setting (Accessibility → Visual effects)."""
+    if not IS_WINDOWS:
+        return True
+    try:
+        value = wintypes.BOOL()
+        SPI_GETCLIENTAREAANIMATION = 0x1042
+        if ctypes.windll.user32.SystemParametersInfoW(
+                SPI_GETCLIENTAREAANIMATION, 0, ctypes.byref(value), 0):
+            return bool(value.value)
+    except Exception:
+        pass
+    return True
+
+
 def set_dark_title_bar(hwnd: int, dark: bool) -> None:
     """Match the native title bar to the window theme (Windows 10 1809+)."""
     if not IS_WINDOWS:
