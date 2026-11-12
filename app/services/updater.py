@@ -18,7 +18,7 @@ import requests
 from PySide6.QtCore import QObject, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 
-APP_VERSION = "1.2.13"
+APP_VERSION = "1.2.14"
 REPO = "Flowbench-Org/FlowBench"
 RELEASES_URL = f"https://github.com/{REPO}/releases"
 LATEST_URL = f"https://github.com/{REPO}/releases/latest"
