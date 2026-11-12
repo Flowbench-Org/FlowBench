@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Server agents report their limits (requests per second, seconds per job, threads, packet size and protocols) when they come online. Before **Start on server**, the Server Agents page checks the job from the Stress page against each selected server. When the job is over a server's limits, a dialog lists what is over, for example "server-hk-01: rate 500 QPS (limit 100), duration 600 s (limit 300)", and offers **Run within limits**, which sends each server the job lowered to its own limits, or **Cancel**. Servers that do not support the job's protocol are skipped, and when none of the selected servers can run it the job is not sent. Agents from older versions report no limits and get the job as before.
+- The **Generate Server Node** dialog sets the node's limits: requests per second (default 100), seconds per job (300) and threads (32). They go into the node's `agent.json`, and the bundle's `README.txt` says what they are and how to change them later.
+- The server list's tooltip shows each server's limits, or that an older agent does not report them.
+
+### Changed
+
+- When a server refuses a job, the Server Agents page says why, in the interface language, next to the server and once in the log, for example "the rate is over the agent's limit (500 > 100)". It used to show only "error", while the reason appeared only in the server's own output.
+- The agent's refusals say by how much a job is over, for example `rate exceeds agent limit: 500 > 100`, and a rate of 0 is reported as such instead of as over the limit. The agent checks its limits when it starts and stops with a clear message if one is not a positive number.
+- The high-rate confirmation asks about the rate actually sent, after lowering to the servers' limits.
+- Japanese language pack 1.0.10 translates the new messages.
+
+### Fixed
+
+- The app no longer stutters for minutes after a heavy local test. The Monitor's TCP connection count listed every connection through psutil once a second, holding Python's lock meanwhile, and a heavy test leaves tens of thousands of connections waiting to close (TIME_WAIT) for about four minutes on Windows. The count now comes from the system's own totals in one call: Windows' TCP statistics, or `/proc/net/sockstat` on Linux, where it took 2.5 ms instead of 197 ms even with only 50 connections. If only the slow way works and it takes long, it runs every 10 seconds instead of every second. On Windows the count now leaves out listening sockets.
+
 ## [1.2.14] - 2026-11-12
 
 ### Added

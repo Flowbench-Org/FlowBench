@@ -203,6 +203,23 @@ class AnimatedLogoTests(unittest.TestCase):
         self.assertFalse(logo.is_animating())
         self.assertTrue(all(value > 240 for value in self.coverage(logo).values()))
 
+    def test_logo_stays_still_once_formed(self):
+        """No bobbing: it showed as a jerky up-and-down on Windows."""
+        logo = self.logo()
+        logo.play_intro(0.0)
+        start = self.clock.t
+        frames = []
+        for moment in (2.2, 3.1, 4.4, 5.9):       # after the intro, between glints
+            self.clock.t = start + moment
+            frames.append((logo.logo_rect(), render(logo)))
+            self.assertFalse(logo.is_animating(), moment)
+        for rect, image in frames[1:]:
+            self.assertEqual(rect, frames[0][0])
+            self.assertEqual(image, frames[0][1])
+        self.assertEqual(frames[0][0].top(), round(frames[0][0].top()))   # whole pixels
+        self.clock.t = start + 7.3               # the glint passes now and then
+        self.assertTrue(logo.is_animating())
+
     def test_liquid_fill_follows_progress(self):
         logo = self.logo()
         logo.set_liquid("fill", 0.5, immediate=True)
