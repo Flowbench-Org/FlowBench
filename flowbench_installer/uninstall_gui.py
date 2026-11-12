@@ -81,7 +81,7 @@ class UninstallWindow(InstallerWindow):
         self.removeDataCheck = CheckBox(card)
         self.bilingual(self.removeDataCheck, "同时删除我的设置、插件和日志",
                        "Also delete my settings, plugins and logs")
-        self.removeDataCheck.stateChanged.connect(lambda _state: self._refresh_data_note())
+        self.removeDataCheck.stateChanged.connect(self._on_remove_data_toggled)
         inner.addWidget(self.removeDataCheck)
         self.dataNote = label(CaptionLabel, card, 12, colors=SECONDARY, wrap=True)
         self.dataNote.setContentsMargins(28, 0, 0, 0)     # line up with the box's text
@@ -181,6 +181,9 @@ class UninstallWindow(InstallerWindow):
         self._refresh_data_note()
         self._render_progress()
         self._render_done()
+
+    def _on_remove_data_toggled(self, _state=None):
+        self._refresh_data_note()
 
     def _refresh_data_note(self):
         # The folder goes on its own line: a path has no spaces to wrap at.

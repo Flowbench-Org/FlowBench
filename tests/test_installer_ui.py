@@ -1,9 +1,11 @@
 """The setup and uninstall windows' look: the logo drawing and its animations,
 the language and theme buttons, and the steps of the new wizard."""
+import gc
 import os
 import re
 import tempfile
 import unittest
+import weakref
 from pathlib import Path
 from unittest import mock
 
@@ -422,7 +424,7 @@ class WizardTests(unittest.TestCase):
         win = self.wizard()
         win.toggle_theme()
         self.assertTrue(win._overlay.active())
-        self.assertEqual(win._dirty_region().boundingRect(), win.rect())
+        self.assertEqual(win.dirty_region().boundingRect(), win.rect())
         self.assertTrue(wait_for(lambda: not win._overlay.isVisible(), 3000))
 
     def test_location_page(self):
@@ -476,7 +478,7 @@ class WizardTests(unittest.TestCase):
         self.assertTrue(win.heroLogo.intro_done())
         self.assertFalse(win.wordmark.is_animating())
         self.assertIsNone(win.startButton.graphicsEffect())
-        region = win._dirty_region()
+        region = win.dirty_region()
         band = win.background.moving_rect(win.rect()).toAlignedRect()
         self.assertTrue(region.contains(band))
         self.assertFalse(region.intersects(QRect(0, 0, win.width(), win.titleBar.height())))
@@ -577,6 +579,77 @@ class UninstallLookTests(unittest.TestCase):
         self.assertEqual(win.percentLabel.text(), "40%")
         self.assertIn("Removing: FlowBench.exe", win.progressDetail.text())
         self.assertAlmostEqual(win.progressLogo._target, 0.6)
+
+
+class WindowLifetimeTests(unittest.TestCase):
+    """A closed window must be freed as soon as nothing refers to it, not
+    left to the cyclic garbage collector: that can run on any thread (the
+    install worker, a download), and a widget destroyed off the GUI thread
+    crashes the process."""
+
+    @classmethod
+    def setUpClass(cls):
+        app()
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.payload, self.info = build_payload(self.root)
+        self.platform = FakePlatform(self.root)
+        self.target = self.root / "Programs" / "FlowBench"
+        theme = qconfig.themeMode.value
+        self.addCleanup(lambda: setTheme(theme))
+
+    def assert_freed(self, make, use):
+        gc.collect()
+        gc.disable()
+        try:
+            win = make()
+            win.show()
+            use(win)
+            win.close()
+            ref = weakref.ref(win)
+            del win
+            self.assertIsNone(ref(), "the window is only reachable through a reference cycle")
+        finally:
+            gc.enable()
+
+    def wizard(self, **kwargs):
+        return SetupWindow(self.payload, self.info, target=self.target, chinese=False,
+                           platform=self.platform, resources=ROOT, **kwargs)
+
+    def test_setup_window_after_using_every_button(self):
+        def use(win):
+            win.show_language_menu()
+            win._language_menu.menuActions()[0].trigger()
+            win._language_menu.close()
+            win.toggle_theme()
+            win.toggle_theme()
+            win.startButton.click()
+            win.backButton.click()
+            win.startButton.click()
+            win.installButton.click()
+            self.assertTrue(wait_for(lambda: win.pages.currentWidget() is win.donePage, 10000))
+        self.assert_freed(self.wizard, use)
+
+    def test_update_window_after_updating(self):
+        self.assert_freed(lambda: self.wizard(update=True, wait_pid=1),
+                          lambda win: self.assertTrue(wait_for(lambda: not win.isVisible(), 10000)))
+
+    def test_uninstall_window(self):
+        session = SetupSession(self.payload, self.info, self.target, platform=self.platform)
+        session.stage()
+        session.activate()
+        session.finalize()
+
+        def use(win):
+            win.removeDataCheck.setChecked(True)
+            win.set_language(True)
+            win.removeDataCheck.setChecked(False)
+        self.assert_freed(lambda: UninstallWindow(self.target, data_dir=self.root / "AppData" / "FlowBench",
+                                                  chinese=False, platform=self.platform, resources=ROOT),
+                          use)
 
 
 class FreeSpaceTests(unittest.TestCase):

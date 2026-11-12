@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import time
+import weakref
 from pathlib import Path
 from typing import Callable, List, Optional
 
@@ -205,6 +206,13 @@ class InstallerWindow(FramelessWindow):
     def __init__(self, *, chinese: Optional[bool] = None, resources: Optional[Path] = None,
                  platform=winplat, motion: Optional[bool] = None, parent=None):
         super().__init__(parent)
+        # The frameless window's effect helper keeps the window in an attribute
+        # it never reads: that cycle would leave a closed window to the cyclic
+        # garbage collector, which can run on a worker thread and must never
+        # destroy a widget there.  A weak reference breaks the cycle.
+        effect = getattr(self, "windowEffect", None)
+        if effect is not None and getattr(effect, "window", None) is self:
+            effect.window = weakref.proxy(self)
         self.platform = platform
         self.chinese = platform.system_prefers_chinese() if chinese is None else bool(chinese)
         self.resources = Path(resources) if resources else None
@@ -214,7 +222,7 @@ class InstallerWindow(FramelessWindow):
                                    self._resource("app_logo_dark.png"))
         self.background = visuals.FlowBackground(self.motion)
         self._animated: List[QWidget] = []
-        self.clock = visuals.FrameClock(self, self.motion, self._dirty_region)
+        self.clock = visuals.FrameClock(self, self.motion)
         self.setObjectName("SetupWindow")
         self.setTitleBar(InstallerTitleBar(self))
         self.setResizeEnabled(False)
@@ -262,15 +270,22 @@ class InstallerWindow(FramelessWindow):
     def show_language_menu(self):
         menu = CheckableMenu(parent=self, indicatorType=MenuIndicatorType.CHECK)
         for chinese, name in ((True, "简体中文"), (False, "English")):
-            action = Action(name, self)
+            action = Action(name, menu)
             action.setCheckable(True)
             action.setChecked(chinese == self.chinese)
-            action.triggered.connect(lambda _checked=False, c=chinese: self.set_language(c))
+            action.setData(chinese)
+            # A bound method, not a lambda holding ``self``: see FrameClock.
+            action.triggered.connect(self._on_language_action)
             menu.addAction(action)
         self._language_menu = menu
         button = self.titleBar.languageButton
         width = menu.sizeHint().width()
         menu.exec(button.mapToGlobal(QPoint(button.width() - width + 12, button.height())))
+
+    def _on_language_action(self, _checked=False):
+        action = self.sender()
+        if action is not None:
+            self.set_language(bool(action.data()))
 
     # -- theme --------------------------------------------------------------
 
@@ -297,7 +312,7 @@ class InstallerWindow(FramelessWindow):
         self._animated.append(widget)
         return widget
 
-    def _dirty_region(self) -> QRegion:
+    def dirty_region(self) -> QRegion:
         if self._overlay.active():
             return QRegion(self.rect())
         region = QRegion(self.background.moving_rect(QRectF(self.rect())).toAlignedRect())

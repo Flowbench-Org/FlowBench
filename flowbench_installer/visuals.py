@@ -310,16 +310,21 @@ def _band_brush(start: QPointF, end: QPointF, centre: float, width: float, peak:
 # ------------------------------------------------------------ frame clock --
 
 class FrameClock(QObject):
-    """Repaints one window: about 60 fps while something moves quickly,
-    30 fps for the background, slower when the window is not active."""
+    """Repaints its parent window: about 60 fps while something moves
+    quickly, 30 fps otherwise, slower when the window is not active.
+
+    It keeps no Python reference to the window (only Qt's parent link): a
+    reference cycle would leave a closed window to the cyclic garbage
+    collector, which may run on a worker thread and must never destroy a
+    widget there.  The window may define ``dirty_region()`` to limit the
+    repaint to what moves.
+    """
 
     FAST, NORMAL, BACKGROUND = 16, 33, 66
 
-    def __init__(self, window: QWidget, enabled: bool = True, region=None):
+    def __init__(self, window: QWidget, enabled: bool = True):
         super().__init__(window)
-        self.window = window
         self.enabled = enabled
-        self._region = region          # () -> QRegion to repaint, None: everything
         self._fast_until = 0.0
         self._timer = QTimer(self)
         self._timer.setTimerType(Qt.PreciseTimer)
@@ -344,14 +349,19 @@ class FrameClock(QObject):
     def _interval(self) -> int:
         if now() < self._fast_until:
             return self.FAST
-        return self.NORMAL if self.window.isActiveWindow() else self.BACKGROUND
+        window = self.parent()
+        return self.NORMAL if window is not None and window.isActiveWindow() else self.BACKGROUND
 
     def _tick(self):
-        region = self._region() if self._region is not None else None
+        window = self.parent()
+        if window is None:
+            return
+        dirty = getattr(window, "dirty_region", None)
+        region = dirty() if dirty is not None else None
         if region is None:
-            self.window.update()
+            window.update()
         elif not region.isEmpty():
-            self.window.update(region)
+            window.update(region)
         interval = self._interval()
         if self._timer.interval() != interval:
             self._timer.setInterval(interval)
