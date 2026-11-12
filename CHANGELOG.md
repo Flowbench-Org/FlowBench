@@ -1,12 +1,18 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.14] - 2026-11-12
 
 ### Added
 
 - The Monitor page can now show a server agent instead of this PC: pick it under **Source** at the top right. Its CPU usage, memory, network download and upload, TCP connections and processes appear in the same cards and charts as the local ones, with the same time windows, pause, clear and CSV export. The servers come from the control channel set on the Server Agents page (a Hub or the MQTT relay), and offline servers are marked. This PC keeps being recorded while a server is shown.
 - Server agents sample CPU, memory, network, TCP connections and processes once a second and send the last 15 seconds with every heartbeat, which now comes every 2 seconds (`metrics_interval`, default 2; `"metrics": false` turns it off and brings back the 10-second heartbeat). Because each heartbeat repeats the recent samples, the desktop keeps one point per second when a heartbeat or a poll is missed, and drops the repeats. On Linux the agent reads `/proc`, so no new package is needed; the network figures leave out the loopback interface. The Windows agent uses psutil, now bundled into `FlowBench-Agent.exe`. The samples travel inside the heartbeat, so an existing Hub passes them on without being updated.
 - An agent deployed before this version does not send these figures; the Monitor page says so and asks to generate the node again and replace the agent on the server. Waiting for the first data, an offline server (the last data received stays on screen) and an unreachable control channel are explained under the toolbar too.
+
+- The setup wizard, the in-app update window and the uninstaller have a new look. They are frameless windows with their own title bar, over an animated background: soft colour glows and network-traffic waves, with packets riding them along the bottom of the window. The outlines of the logo's three ribbons were traced from `app_logo.png`, so the logo can be built ribbon by ribbon while what shows is still the PNG itself. On the welcome page it forms: points of light gather, the three ribbons flow out one after another from the bottom up, and a highlight sweeps across. "FlowBench" is then written in letter by letter. A globe button in the title bar switches between 简体中文 and English, and the button next to it between light and dark; every text, including an error already on screen, follows at once, with a short cross-fade. The windows still start in FlowBench's own language and theme.
+- Setup now has four steps: welcome, **Get started**; the install location, where the default folder is filled in, **Browse…** picks another and **Use the default folder** brings it back, with the space needed and free shown underneath (in red when it is short); progress; and done. While installing, the logo fills up like liquid as the progress bar moves; the bar uses the logo's blue-to-cyan colours with a moving sheen, and shows the file being extracted and the percentage. The last page offers **Finish** and **Open FlowBench**; it used to be a "Launch FlowBench now" box and **Finish**. **Back** returns to the welcome page.
+- **Update now** in the app still installs on its own and reopens FlowBench, in a compact window with the same look: the logo fills as the update goes, and gets a green tick when it is done. "Waiting for FlowBench to exit" now stays on screen until FlowBench has closed; it used to disappear at once.
+- In the uninstaller the logo drains as the files are removed, and the last page shows it faded with a green tick.
+- With Windows' **Animation effects** turned off, nothing moves: the logo is shown whole and pages switch at once. Only the parts that move are repainted, at most 60 times a second and less when the window is in the background, and nothing is painted while it is minimised.
 
 ### Changed
 
@@ -15,6 +21,7 @@
 
 ### Verified
 
+- Rendered every page of setup, update and uninstall in Chinese and English, light and dark, including the intro frame by frame, an error, a short disk and a finished install. Automated tests cover the traced logo (more than 95 % overlap with the PNG), each animation stage, the liquid fill and drain, the language and theme buttons on every page, the new steps and the automatic update. The Windows build of the installer was not made here.
 - Ran a real Hub and agent process on Linux and read them with the desktop's client: one sample per second arrived without gaps or repeats, and the `/proc` readings matched psutil (memory 81.3 % in both, TCP connections 73 against 74, processes 250 against 249). The relay path was checked with a real signed status message and the desktop's message handler, not against the public broker. Looked at the Monitor page in Chinese and English, light and dark, with a live server, an older agent and no servers.
 
 ## [1.2.13] - 2026-11-11

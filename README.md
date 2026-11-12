@@ -57,17 +57,19 @@ Check the built-in `example_hello.py` / `example_dns.py` plugins in the plugin f
 
 1. Go to the [**Releases**](https://github.com/Flowbench-Org/FlowBench/releases/latest) page
 2. Download the latest `FlowBench-Setup-x.x.x.exe`
-3. Run the installer and follow the wizard (desktop shortcut optional). It installs for the
-   current user in `%LOCALAPPDATA%\Programs\FlowBench` without administrator rights, and removes
-   an older Inno Setup install (1.2.7 and earlier) automatically
+3. Run the installer: **Get started**, keep the default folder or choose another, then **Install**
+   (desktop shortcut optional), and **Open FlowBench** at the end. It installs for the current
+   user in `%LOCALAPPDATA%\Programs\FlowBench` without administrator rights, and removes an older
+   Inno Setup install (1.2.7 and earlier) automatically. The globe button at the top right switches
+   the installer between 中文 and English, the button next to it between light and dark
 4. Launch from the Start menu or desktop
 
 Later updates install from inside the app: **Settings → Check for Updates → Update now** downloads
 the new installer with a progress bar, closes FlowBench, updates it and reopens it. If the download
 fails, **Open in browser** opens the release page so you can download the installer yourself and run
 it. Uninstall from
-Windows **Settings → Apps**: the uninstaller uses the same window as setup, in FlowBench's language
-and theme. Settings, plugins and logs in `%APPDATA%\FlowBench` are kept unless you tick
+Windows **Settings → Apps**: the uninstaller has the same look as setup and starts in FlowBench's
+language and theme. Settings, plugins and logs in `%APPDATA%\FlowBench` are kept unless you tick
 **Also delete my settings, plugins and logs**.
 
 ### Run from Source (Developers)
@@ -85,7 +87,7 @@ One step (stops at the first failure and prints the installer path):
 
 ```bash
 powershell -ExecutionPolicy Bypass -File build_installer.ps1
-# Output: installer/FlowBench-Setup-1.2.13.exe
+# Output: installer/FlowBench-Setup-1.2.14.exe
 ```
 
 Only Python and PyInstaller are needed; the installer is FlowBench's own (`flowbench_installer/`),
@@ -99,7 +101,7 @@ powershell -File build_all.ps1
 python -m PyInstaller --clean --noconfirm Uninstall.spec
 python tools/make_payload.py
 python -m PyInstaller --clean --noconfirm Setup.spec
-# Output: dist/FlowBench-Setup-1.2.13.exe
+# Output: dist/FlowBench-Setup-1.2.14.exe
 ```
 
 To publish, upload `FlowBench-Setup-<version>.exe` to the GitHub release under exactly that
@@ -166,15 +168,16 @@ FlowBench v1.1.0 内置完整插件平台，可以自由扩展功能：
 
 1. 进入 [**Releases**](https://github.com/Flowbench-Org/FlowBench/releases/latest) 发布页
 2. 下载最新的 `FlowBench-Setup-x.x.x.exe`
-3. 双击运行，按向导完成安装（可勾选桌面快捷方式）。默认为当前用户安装到
-   `%LOCALAPPDATA%\Programs\FlowBench`，不需要管理员权限；检测到旧版（1.2.7 及以前的
-   Inno Setup 安装）会自动卸载
+3. 双击运行：点 **开始安装**，使用默认位置或换一个文件夹，再点 **安装**（可勾选桌面快捷方式），
+   装完点 **打开 FlowBench**。默认为当前用户安装到 `%LOCALAPPDATA%\Programs\FlowBench`，
+   不需要管理员权限；检测到旧版（1.2.7 及以前的 Inno Setup 安装）会自动卸载。
+   右上角的地球按钮切换中文 / English，旁边的按钮切换浅色 / 深色
 4. 安装后从开始菜单或桌面启动
 
 之后的更新在软件内完成：**设置 → 检查更新 → 立即更新**，带进度条下载新版安装包，
 自动关闭 FlowBench、完成更新并重新打开。下载失败时可以点 **用浏览器下载**，
 到发布页自己下载安装包后运行。卸载在 Windows **设置 → 应用** 中进行，
-卸载程序和安装向导是同一套界面，语言和深浅色跟随 FlowBench 的设置。`%APPDATA%\FlowBench`
+卸载程序和安装向导是同一种外观，打开时的语言和深浅色跟随 FlowBench 的设置。`%APPDATA%\FlowBench`
 里的设置、插件和日志默认保留，勾选 **同时删除我的设置、插件和日志** 才会删除。
 
 ### 从源码运行（开发者）
@@ -192,7 +195,7 @@ python main.py
 
 ```bash
 powershell -ExecutionPolicy Bypass -File build_installer.ps1
-# 产物位于 installer/FlowBench-Setup-1.2.13.exe
+# 产物位于 installer/FlowBench-Setup-1.2.14.exe
 ```
 
 只需要 Python 和 PyInstaller。安装程序是 FlowBench 自己的（`flowbench_installer/`），
@@ -206,7 +209,7 @@ powershell -File build_all.ps1
 python -m PyInstaller --clean --noconfirm Uninstall.spec
 python tools/make_payload.py
 python -m PyInstaller --clean --noconfirm Setup.spec
-# 产物位于 dist/FlowBench-Setup-1.2.13.exe
+# 产物位于 dist/FlowBench-Setup-1.2.14.exe
 ```
 
 发布时把 `FlowBench-Setup-<版本号>.exe` 原名上传到 GitHub Release，软件内更新按这个文件名查找。
