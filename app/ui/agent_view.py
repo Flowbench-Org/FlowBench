@@ -24,14 +24,15 @@ from PySide6.QtCore import QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter, QPen
 from PySide6.QtWidgets import (QBoxLayout, QFileDialog, QGridLayout, QHBoxLayout,
                                QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
-from qfluentwidgets import (BodyLabel, CaptionLabel, CheckBox, ComboBox, FluentIcon as FIF,
-                            FluentStyleSheet, InfoBar,
-                            MessageBoxBase,
+from qfluentwidgets import (BodyLabel, CaptionLabel, CheckBox, ComboBox, CompactSpinBox,
+                            FluentIcon as FIF, FluentStyleSheet, InfoBar,
+                            MessageBox, MessageBoxBase,
                             InfoBarPosition, LineEdit, PasswordLineEdit,
                             PrimaryPushButton, PushButton, ScrollArea, SearchLineEdit,
                             SimpleCardWidget, StrongBodyLabel, SubtitleLabel,
                             getFont, isDarkTheme, themeColor, Theme)
 
+from app.services import agent_limits
 from app.services.agent_control import ControllerClient, RelayControllerClient
 from app.services.remote_monitor import remote_monitor
 from app.services.auth import add_authorized, build_http_url, is_authorized, normalize_host
@@ -95,6 +96,48 @@ def agent_os(agent) -> str:
     if "linux" in platform_name:
         return "linux"
     return ""
+
+
+def limits_text(limits) -> str:
+    """An agent's reported limits in one line."""
+    return L(f"上限 {limits['max_rate']:g} QPS · {limits['max_duration']} 秒 · {limits['max_threads']} 线程",
+             f"Limits {limits['max_rate']:g} QPS · {limits['max_duration']} s · {limits['max_threads']} threads")
+
+
+def problem_text(field, asked, allowed) -> str:
+    """One thing a job asks for that an agent does not allow."""
+    if field == "protocol":
+        return L(f"不支持 {asked} 协议", f"does not support {asked}")
+    if field == "rate":
+        return L(f"速率 {asked:g} QPS（上限 {allowed:g}）", f"rate {asked:g} QPS (limit {allowed:g})")
+    if field == "duration":
+        return L(f"时长 {asked} 秒（上限 {allowed}）", f"duration {asked} s (limit {allowed})")
+    if field == "threads":
+        return L(f"线程 {asked}（上限 {allowed}）", f"threads {asked} (limit {allowed})")
+    return L(f"数据包 {asked} 字节（上限 {allowed}）", f"packet size {asked} bytes (limit {allowed})")
+
+
+def refusal_text(error) -> str:
+    """Why an agent refused a command, in the interface language; any other
+    error is shown as the agent wrote it."""
+    found = agent_limits.refusal(error)
+    if found is None:
+        return str(error)
+    kind, asked, limit = found
+    reason = {
+        "rate": L("速率超过节点上限", "the rate is over the agent's limit"),
+        "duration": L("时长超过节点上限", "the duration is over the agent's limit"),
+        "threads": L("线程数超过节点上限", "the thread count is over the agent's limit"),
+        "packet_size": L("数据包大小超过节点上限", "the packet size is over the agent's limit"),
+        "protocol": L("节点不支持这个协议", "the agent does not support this protocol"),
+        "target": L("目标不在节点的授权列表里", "the target is not on the agent's allow-list"),
+        "busy": L("节点上已经有任务在运行", "a job is already running on the agent"),
+    }[kind]
+    if asked and limit:
+        return L(f"{reason}（{asked} > {limit}）", f"{reason} ({asked} > {limit})")
+    if asked:
+        return L(f"{reason}：{asked}", f"{reason}: {asked}")
+    return reason
 
 
 def _paint_os_badge(painter, rect, os_name):
@@ -171,7 +214,11 @@ class AgentRow(QWidget):
         self.online = bool(agent.get("online"))
         self.status = L("在线", "online") if self.online else L("离线", "offline")
         platform_name = str(metadata.get("platform") or "").strip()
-        self.setToolTip("\n".join(part for part in (self.title, self.details, platform_name) if part))
+        limits = agent_limits.reported_limits(agent)
+        self.limits = limits_text(limits) if limits else L("未报告上限（旧版节点）",
+                                                           "Limits not reported (older agent)")
+        self.setToolTip("\n".join(part for part in (self.title, self.details, platform_name, self.limits)
+                                  if part))
         self.setAccessibleName(f"{self.title} — {self.details} — {self.status}")
 
     def enterEvent(self, event):
@@ -455,6 +502,28 @@ class GenerateNodeDialog(MessageBoxBase):
         self.viewLayout.addWidget(self.relayHint)
         self._update_connection_mode()
 
+        limits_row = QHBoxLayout()
+        limits_row.setSpacing(6)
+        limits_row.addWidget(BodyLabel(L("节点上限", "Agent limits"), self.widget))
+        limits_row.addSpacing(6)
+        defaults = agent_limits.DEFAULT_LIMITS
+        self.rateLimitSpin = self._limit_spin(1, 100000, defaults["max_rate"])
+        self.durationLimitSpin = self._limit_spin(1, 30 * 86400, defaults["max_duration"])
+        self.threadLimitSpin = self._limit_spin(1, 1024, defaults["max_threads"])
+        for spin, unit in ((self.rateLimitSpin, "QPS"), (self.durationLimitSpin, L("秒", "s")),
+                           (self.threadLimitSpin, L("线程", "threads"))):
+            limits_row.addWidget(spin)
+            limits_row.addWidget(CaptionLabel(unit, self.widget))
+            limits_row.addSpacing(6)
+        limits_row.addStretch(1)
+        self.viewLayout.addLayout(limits_row)
+        self.limitsHint = CaptionLabel(L(
+            "节点会拒绝超过这些上限的任务。以后也可以改服务器上 agent.json 里的 max_rate、max_duration、max_threads，改完重启节点。",
+            "The agent refuses jobs above these limits. You can change max_rate, max_duration and "
+            "max_threads in agent.json on the server later, then restart the agent."), self.widget)
+        self.limitsHint.setWordWrap(True)
+        self.viewLayout.addWidget(self.limitsHint)
+
         output_row = QHBoxLayout()
         output_row.addWidget(BodyLabel(L("保存位置", "Save location"), self.widget))
         self.outputEdit = LineEdit(self.widget)
@@ -467,6 +536,20 @@ class GenerateNodeDialog(MessageBoxBase):
         browse_button.clicked.connect(self._pick_output)
         output_row.addWidget(browse_button)
         self.viewLayout.addLayout(output_row)
+
+    def _limit_spin(self, low, high, value):
+        spin = CompactSpinBox(self.widget)
+        spin.setRange(low, high)
+        spin.setValue(int(value))
+        spin.setMinimumWidth(110)
+        return spin
+
+    def limits(self):
+        """The limits to write into the node's agent.json."""
+        return {"max_rate": self.rateLimitSpin.value(),
+                "max_duration": self.durationLimitSpin.value(),
+                "max_threads": self.threadLimitSpin.value(),
+                "max_packet_size": agent_limits.DEFAULT_LIMITS["max_packet_size"]}
 
     @staticmethod
     def _default_output_dir():
@@ -541,6 +624,7 @@ class AgentView(ScrollArea):
         self._last_poll_error = ""
         self._last_remote_key = ""
         self._completion_logged = {}
+        self._refusal_logged = {}
         self._relay_client = None
         self._relay_client_key = None
         self._poll_timer = QTimer(self)
@@ -828,6 +912,7 @@ class AgentView(ScrollArea):
             self._show_error(str(exc))
             return
 
+        limits = dialog.limits()
         self.generateBtn.setEnabled(False)
         if dialog.connection_mode() == "relay":
             relay_url = url if use_existing_relay else (
@@ -835,7 +920,7 @@ class AgentView(ScrollArea):
             )
             controller_token = token if use_existing_relay else secrets.token_urlsafe(32)
             self._async("generate_relay", lambda: self._generate_relay_package(
-                name, relay_url, controller_token, str(output_path)))
+                name, relay_url, controller_token, str(output_path), limits))
             return
         if has_hub:
             try:
@@ -844,7 +929,8 @@ class AgentView(ScrollArea):
                 self.generateBtn.setEnabled(True)
                 self._show_error(str(exc))
                 return
-            self._async("generate", lambda: self._provision_and_package(client, name, str(output_path)))
+            self._async("generate", lambda: self._provision_and_package(
+                client, name, str(output_path), limits))
             return
 
         public_address = dialog.server_address()
@@ -855,7 +941,7 @@ class AgentView(ScrollArea):
             self._show_error(str(exc))
             return
         self._async("generate_offline", lambda: self._generate_all_in_one_package(
-            name, host, port, str(output_path)))
+            name, host, port, str(output_path), limits))
 
     @staticmethod
     def _normalize_public_hub(value):
@@ -916,9 +1002,25 @@ class AgentView(ScrollArea):
         ))
         return cert_path, key_path
 
-    def _generate_all_in_one_package(self, name, public_host, public_port, output):
+    @staticmethod
+    def _node_limits(limits=None):
+        return dict(agent_limits.DEFAULT_LIMITS, **(limits or {}))
+
+    @staticmethod
+    def _limits_note(limits):
+        """The README's paragraph about the node's limits."""
+        return "\n\n" + L(
+            f"节点上限：每秒最多 {limits['max_rate']:g} 次请求，单个任务最长 {limits['max_duration']} 秒，"
+            f"最多 {limits['max_threads']} 个线程。要调整，就改服务器上 agent.json 里的 "
+            "max_rate、max_duration、max_threads，然后重启节点。",
+            f"Agent limits: at most {limits['max_rate']:g} requests per second, "
+            f"{limits['max_duration']} s per job and {limits['max_threads']} threads. To change them, "
+            "edit max_rate, max_duration and max_threads in agent.json on the server, then restart the agent.")
+
+    def _generate_all_in_one_package(self, name, public_host, public_port, output, limits=None):
         """Create a Hub plus node package without requiring an already-running Hub."""
         output = Path(output).resolve()
+        limits = self._node_limits(limits)
         agent_exe, linux_root = self._node_payload_paths()
         hub_exe = self._hub_exe_path()
         hub_source = linux_root / "agent" / "hub.py"
@@ -942,10 +1044,7 @@ class AgentView(ScrollArea):
             "ca_file": "ca.pem",
             "allowed_targets": sorted({str(item.get("host")) for item in settings.authorized if item.get("host")}),
             "allowed_protocols": ["HTTP", "HTTPS", "TCP"],
-            "max_rate": 100,
-            "max_duration": 300,
-            "max_threads": 32,
-            "max_packet_size": 65536,
+            **limits,
             "poll_interval": 2,
             "heartbeat_interval": 10,
             "job_heartbeat_interval": 2,
@@ -1073,7 +1172,7 @@ exec python3 agent/server_agent.py --config agent/agent.json
                     "A .ca.pem certificate is generated beside the ZIP; keep it because the GUI needs it to connect.\n"
                     "This package uses a random self-signed certificate for your own control plane only.\n"
                     "Use only targets you own or are authorized to test.")
-                bundle.writestr("README.txt", instructions)
+                bundle.writestr("README.txt", instructions + self._limits_note(limits))
 
         ca_path = output.with_suffix(".ca.pem")
         ca_path.write_bytes(cert_pem)
@@ -1086,9 +1185,10 @@ exec python3 agent/server_agent.py --config agent/agent.json
             "ca_file": str(ca_path),
         }
 
-    def _generate_relay_package(self, name, relay_url, controller_token, output):
+    def _generate_relay_package(self, name, relay_url, controller_token, output, limits=None):
         """Create a standalone node package that uses the public MQTT relay."""
         output = Path(output).resolve()
+        limits = self._node_limits(limits)
         exe, linux_root = self._node_payload_paths()
         source_files = [linux_root / name for name in LINUX_AGENT_FILES]
         missing = ([exe] if not exe.is_file() else []) + [
@@ -1112,10 +1212,7 @@ exec python3 agent/server_agent.py --config agent/agent.json
             "name": name,
             "allowed_targets": allowed_targets,
             "allowed_protocols": ["HTTP", "HTTPS", "TCP"],
-            "max_rate": 100,
-            "max_duration": 300,
-            "max_threads": 32,
-            "max_packet_size": 65536,
+            **limits,
             "heartbeat_interval": 10,
             "job_heartbeat_interval": 2,
         }
@@ -1148,7 +1245,7 @@ exec python3 agent/server_agent.py --config agent/agent.json
             info.create_system = 3
             info.external_attr = 0o755 << 16
             bundle.writestr(info, start_sh, compress_type=zipfile.ZIP_DEFLATED)
-            bundle.writestr("README.txt", instructions)
+            bundle.writestr("README.txt", instructions + self._limits_note(limits))
         return {
             "path": str(output),
             "agent_id": agent_id,
@@ -1158,7 +1255,8 @@ exec python3 agent/server_agent.py --config agent/agent.json
             "ca_file": "",
         }
 
-    def _provision_and_package(self, client, name, output):
+    def _provision_and_package(self, client, name, output, limits=None):
+        limits = self._node_limits(limits)
         record = client.provision_agent(name)
         exe, linux_root = self._node_payload_paths()
         source_files = [linux_root / name for name in LINUX_AGENT_FILES]
@@ -1173,10 +1271,7 @@ exec python3 agent/server_agent.py --config agent/agent.json
             "token": record["token"],
             "allowed_targets": allowed_targets,
             "allowed_protocols": ["HTTP", "HTTPS", "TCP"],
-            "max_rate": 100,
-            "max_duration": 300,
-            "max_threads": 32,
-            "max_packet_size": 65536,
+            **limits,
             "poll_interval": 2,
             "heartbeat_interval": 10,
             "job_heartbeat_interval": 2,
@@ -1210,7 +1305,7 @@ exec python3 agent/server_agent.py --config agent/agent.json
             info.create_system = 3
             info.external_attr = 0o755 << 16
             bundle.writestr(info, start_sh, compress_type=zipfile.ZIP_DEFLATED)
-            bundle.writestr("README.txt", instructions)
+            bundle.writestr("README.txt", instructions + self._limits_note(limits))
         return {"path": output, "agent_id": record["agent_id"], "name": name}
 
     @classmethod
@@ -1326,18 +1421,6 @@ exec python3 agent/server_agent.py --config agent/agent.json
 
         protocol = stress.protoCombo.currentText().upper()
         rate = stress.rateSpin.value()
-        if rate > HIGH_RATE:
-            from qfluentwidgets import MessageBox
-            confirm = MessageBox(
-                L("高请求速率二次确认", "High Rate Confirmation"),
-                L(f"服务器节点将使用压力测试页配置向 {host} 发送最高 {rate} QPS。\n"
-                  "请再次确认目标已获授权且能够承受该速率。",
-                  f"The server agent will use the Stress page configuration against {host}, up to {rate} QPS.\n"
-                  "Confirm that the target is authorized and can handle this rate."),
-                self.window())
-            if not confirm.exec():
-                raise ValueError(L("高速率未确认，服务器任务已取消",
-                                   "High rate not confirmed; server job cancelled"))
 
         headers_raw = stress.headersEdit.toPlainText().strip()
         try:
@@ -1364,6 +1447,66 @@ exec python3 agent/server_agent.py --config agent/agent.json
             config["url"] = build_http_url(target_raw, host, port, protocol)
         return config
 
+    def _confirm_high_rate(self, host, rate) -> bool:
+        confirm = MessageBox(
+            L("高请求速率二次确认", "High Rate Confirmation"),
+            L(f"服务器节点将使用压力测试页配置向 {host} 发送最高 {rate:g} QPS。\n"
+              "请再次确认目标已获授权且能够承受该速率。",
+              f"The server agent will use the Stress page configuration against {host}, up to {rate:g} QPS.\n"
+              "Confirm that the target is authorized and can handle this rate."),
+            self.window())
+        return bool(confirm.exec())
+
+    def ask_fit(self, title, text) -> bool:
+        """Run a job lowered to the agents' limits? (tests replace this)"""
+        box = MessageBox(title, text, self.window())
+        box.yesButton.setText(L("按上限运行", "Run within limits"))
+        box.cancelButton.setText(L("取消", "Cancel"))
+        return bool(box.exec())
+
+    def _fit_to_agents(self, agent_ids, job):
+        """{agent_id: job} within the limits each agent reported, after asking
+        when a job must be lowered or an agent skipped; None when cancelled.
+        Agents that report no limits (older ones) get the job as it is."""
+        known = {str(agent.get("agent_id") or ""): agent for agent in self._agents}
+        jobs, lines, lowered = {}, [], []
+        for agent_id in agent_ids:
+            agent = known.get(agent_id) or {}
+            limits = agent_limits.reported_limits(agent)
+            found = agent_limits.problems(job, limits)
+            if not found:
+                jobs[agent_id] = dict(job)
+                continue
+            name = str(agent.get("name") or agent_id)
+            reasons = L("、", ", ").join(problem_text(*item) for item in found)
+            fitted = agent_limits.fit(job, limits)
+            if fitted is None:
+                lines.append(L(f"• {name}：{reasons}，将跳过", f"• {name}: {reasons}; it will be skipped"))
+            else:
+                jobs[agent_id] = fitted
+                lowered.append((name, fitted))
+                lines.append(L(f"• {name}：{reasons}", f"• {name}: {reasons}"))
+        if not lines:
+            return jobs
+        if not jobs:
+            self._show_error(L("所选节点都不能运行这个任务：", "None of the selected agents can run this job: ")
+                             + L("；", "; ").join(line.lstrip("• ") for line in lines))
+            return None
+        text = (L("这次任务超过了部分节点的上限，直接发送会被节点拒绝：",
+                  "This job is over the limits of some agents, which would refuse it:")
+                + "\n\n" + "\n".join(lines) + "\n\n"
+                + L("可以按各节点的上限运行；也可以取消，调低压力测试页的设置，或在服务器的 agent.json 里调高上限后重启节点。",
+                    "Run it within each agent's limits, or cancel and lower the Stress page settings, "
+                    "or raise the limits in agent.json on the server and restart the agent."))
+        if not self.ask_fit(L("超出节点上限", "Over the agents' limits"), text):
+            self._log(L("已取消：任务超出节点上限。", "Cancelled: the job is over the agents' limits."))
+            return None
+        for name, fitted in lowered:
+            self._log(L(f"节点 {name} 按上限运行：{fitted['rate']:g} QPS、{fitted['duration']} 秒、{fitted['threads']} 线程",
+                        f"Agent {name} runs within its limits: {fitted['rate']:g} QPS, "
+                        f"{fitted['duration']} s, {fitted['threads']} threads"))
+        return jobs
+
     def run_job(self):
         agent_ids = self._selected_agents_ids()
         if not agent_ids:
@@ -1375,16 +1518,24 @@ exec python3 agent/server_agent.py --config agent/agent.json
         except Exception as exc:
             self._show_error(str(exc))
             return
-        command = {"type": "start", "job_id": uuid.uuid4().hex, "config": job}
+        jobs = self._fit_to_agents(agent_ids, job)
+        if not jobs:
+            return
+        top_rate = max(item["rate"] for item in jobs.values())
+        if top_rate > HIGH_RATE and not self._confirm_high_rate(job["target"], top_rate):
+            self._show_error(L("高速率未确认，服务器任务已取消", "High rate not confirmed; server job cancelled"))
+            return
+        job_id = uuid.uuid4().hex
         # Keep the node allow-list aligned with the authorized target currently
         # selected on the Stress page, then queue the start command on every
         # selected agent. Each send is isolated so one offline node does not
         # prevent the remaining servers from receiving the task.
         def dispatch():
             results = []
-            for agent_id in agent_ids:
+            for agent_id, agent_job in jobs.items():
+                command = {"type": "start", "job_id": job_id, "config": agent_job}
                 try:
-                    client.send(agent_id, {"type": "sync_targets", "targets": [job["target"]]})
+                    client.send(agent_id, {"type": "sync_targets", "targets": [agent_job["target"]]})
                     client.send(agent_id, command)
                     results.append({"agent_id": agent_id, "ok": True})
                 except Exception as exc:
@@ -1548,6 +1699,15 @@ exec python3 agent/server_agent.py --config agent/agent.json
                     "stopping": L("停止中", "stopping"), "completed": L("完成", "completed"),
                     "error": L("错误", "error"),
                 }.get(state, state)
+                if state == "error" and stats.get("error"):
+                    reason = refusal_text(stats.get("error"))
+                    parts.append(f"{name} [{state_text}]: {reason}")
+                    key = f"{stats.get('error')}|{stats.get('ts')}"
+                    if self._refusal_logged.get(name) != key:
+                        self._refusal_logged[name] = key
+                        self._log(L(f"服务器节点 {name} 拒绝了任务：{reason}",
+                                    f"Server node {name} refused the job: {reason}"))
+                    continue
                 parts.append(
                     f"{name} [{state_text}]: ✓{stats.get('success',0)} "
                     f"✗{stats.get('fail',0)} ({stats.get('qps',0):.0f} QPS) {fmt_bytes(tx)}")

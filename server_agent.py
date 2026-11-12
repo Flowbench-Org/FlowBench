@@ -37,6 +37,9 @@ DEFAULTS = {
     "metrics": True, "metrics_interval": 2.0,
 }
 SUPPORTED_PROTOCOLS = {"HTTP", "HTTPS", "TCP"}
+# The most a job may ask for; the desktop reads them from the agent's
+# metadata and checks a job before sending it.
+LIMIT_TYPES = {"max_rate": float, "max_duration": int, "max_threads": int, "max_packet_size": int}
 
 
 class AgentHTTPError(RuntimeError):
@@ -158,6 +161,17 @@ def load_config(path: Path):
     if not isinstance(raw_protocols, (list, tuple, set)):
         raw_protocols = DEFAULTS["allowed_protocols"]
     merged["allowed_protocols"] = [str(x).upper() for x in raw_protocols]
+    for key, kind in LIMIT_TYPES.items():
+        value = merged.get(key)
+        try:
+            if isinstance(value, bool):
+                raise TypeError
+            number = kind(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{key} must be a positive number") from exc
+        if not (math.isfinite(number) and number > 0):
+            raise ValueError(f"{key} must be a positive number")
+        merged[key] = number
     merged["metrics"] = merged.get("metrics", True) is not False
     try:
         metrics_interval = float(merged.get("metrics_interval", DEFAULTS["metrics_interval"]))
@@ -238,10 +252,16 @@ def validate_job(raw: dict, config: dict):
     except (TypeError, ValueError) as exc:
         raise ValueError("numeric job fields are invalid") from exc
     if not math.isfinite(rate): raise ValueError("rate must be finite")
-    if not (0 < rate <= float(config["max_rate"])): raise ValueError("rate exceeds agent limit")
-    if not (0 < duration <= int(config["max_duration"])): raise ValueError("duration exceeds agent limit")
-    if not (0 < threads <= int(config["max_threads"])): raise ValueError("threads exceed agent limit")
-    if not (0 < packet_size <= int(config["max_packet_size"])): raise ValueError("packet_size exceeds agent limit")
+    # The messages start the same as before, so older desktops still read them.
+    if rate <= 0: raise ValueError("rate must be positive")
+    if rate > float(config["max_rate"]):
+        raise ValueError(f"rate exceeds agent limit: {rate:g} > {float(config['max_rate']):g}")
+    if not (0 < duration <= int(config["max_duration"])):
+        raise ValueError(f"duration exceeds agent limit: {duration} > {int(config['max_duration'])}")
+    if not (0 < threads <= int(config["max_threads"])):
+        raise ValueError(f"threads exceed agent limit: {threads} > {int(config['max_threads'])}")
+    if not (0 < packet_size <= int(config["max_packet_size"])):
+        raise ValueError(f"packet_size exceeds agent limit: {packet_size} > {int(config['max_packet_size'])}")
     if not (1 <= port <= 65535): raise ValueError("port must be between 1 and 65535")
     if not (100 <= timeout <= 60000): raise ValueError("timeout must be between 100 and 60000 ms")
     if proto in {"HTTP", "HTTPS"}:
@@ -326,8 +346,20 @@ class AgentRuntime:
         print(f"[agent] job started: {self.job_id}")
 
 
-def metadata():
-    return {"hostname": socket.gethostname(), "platform": platform.platform(), "python": platform.python_version(), "pid": os.getpid()}
+def agent_limits(config) -> dict:
+    """What this agent accepts, reported to the desktop with its metadata."""
+    limits = {key: kind(config.get(key, DEFAULTS[key])) for key, kind in LIMIT_TYPES.items()}
+    limits["protocols"] = [p for p in config.get("allowed_protocols", DEFAULTS["allowed_protocols"])
+                           if p in SUPPORTED_PROTOCOLS]
+    return limits
+
+
+def metadata(config=None):
+    data = {"hostname": socket.gethostname(), "platform": platform.platform(),
+            "python": platform.python_version(), "pid": os.getpid()}
+    if config is not None:
+        data["limits"] = agent_limits(config)
+    return data
 
 
 def run_relay_agent(config, config_path):
@@ -348,7 +380,7 @@ def run_relay_agent(config, config_path):
     connected = threading.Event()
     processed_ids = set()
     processed_order = []
-    agent_metadata = metadata()
+    agent_metadata = metadata(config)
     sampler = start_sampler(config)
 
     def status_message(online=True, event=None):
@@ -478,7 +510,7 @@ def run_agent(config, config_path):
         try:
             now = time.monotonic()
             if not registered:
-                hub.register(metadata()); registered = True
+                hub.register(metadata(config)); registered = True
                 print(f"[agent] online as {config['agent_id']} (hub={config['hub_url']})", flush=True)
             event = runtime.current_event()
             if now - last_heartbeat >= heartbeat_interval(config, event, sampler is not None):

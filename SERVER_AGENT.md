@@ -130,6 +130,14 @@ python server_agent.py --config agent.json
 
 Seeing `online as server-01` means the Agent is online. The server only needs outbound HTTPS access to the Hub; no inbound ports need to be opened for the Agent.
 
+### Limits
+
+`max_rate` (requests per second), `max_duration` (seconds per job), `max_threads` and `max_packet_size` (bytes) are the most a job may ask for, and `allowed_protocols` the protocols it may use. The Agent refuses anything above them and says by how much, for example `command rejected: rate exceeds agent limit: 500 > 100`. When it starts, it stops with a clear message if one of the limits is not a positive number.
+
+The **Generate Server Node** dialog sets the rate, duration and thread limits (100 QPS, 300 s and 32 threads unless you change them); the bundle's `README.txt` repeats them. To change them later, edit `agent.json` on the server and restart the Agent.
+
+The Agent reports its limits to the desktop when it comes online. Before **Start on server**, the desktop checks the job from the Stress page against each selected server: if the job is over a server's limits, it lists what is over and offers to run it within each server's limits (each server gets the job lowered to its own limits) or to cancel. Servers that do not support the job's protocol are skipped. An Agent from an older FlowBench does not report its limits and is sent the job as it is. When a server refuses a job, the Server Agents page shows why next to the server and in its log.
+
 ### System metrics
 
 The Agent samples its server's CPU usage, memory, network throughput (loopback left out), TCP connections and processes once a second and sends the last 15 seconds with every heartbeat. While metrics are on, a heartbeat goes out every `metrics_interval` seconds (default `2`, from 1 to 60). Add `"metrics": false` to turn them off and go back to `heartbeat_interval`.

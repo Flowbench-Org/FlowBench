@@ -780,6 +780,35 @@ _RESOURCES = [
     ('無効な対象：{#0}', '无效目标：{#0}', 'Invalid target: {#0}'),
     ('高レートが確認されていないため、中止しました', '高速率未确认，测试已取消', 'High rate not confirmed; cancelled'),
     ('プラグインから対象を取得できません', '插件目标获取失败', 'Plugin target fetch failed'),
+    ('上限を報告していません（旧バージョンのノード）', '未报告上限（旧版节点）', 'Limits not reported (older agent)'),
+    ('ノードの上限', '节点上限', 'Agent limits'),
+    ('スレッド', '线程', 'threads'),
+    ('ノードはこの上限を超えるタスクを拒否します。あとからサーバーの agent.json で max_rate、max_duration、max_threads を変更でき、変更後はノードを再起動してください。', '节点会拒绝超过这些上限的任务。以后也可以改服务器上 agent.json 里的 max_rate、max_duration、max_threads，改完重启节点。', 'The agent refuses jobs above these limits. You can change max_rate, max_duration and max_threads in agent.json on the server later, then restart the agent.'),
+    ('レートがノードの上限を超えています', '速率超过节点上限', "the rate is over the agent's limit"),
+    ('時間がノードの上限を超えています', '时长超过节点上限', "the duration is over the agent's limit"),
+    ('スレッド数がノードの上限を超えています', '线程数超过节点上限', "the thread count is over the agent's limit"),
+    ('パケットサイズがノードの上限を超えています', '数据包大小超过节点上限', "the packet size is over the agent's limit"),
+    ('ノードはこのプロトコルに対応していません', '节点不支持这个协议', 'the agent does not support this protocol'),
+    ('対象がノードの許可リストにありません', '目标不在节点的授权列表里', "the target is not on the agent's allow-list"),
+    ('ノードではすでにタスクが実行中です', '节点上已经有任务在运行', 'a job is already running on the agent'),
+    ('上限内で実行', '按上限运行', 'Run within limits'),
+    ('、', '、', ', '),
+    ('選択したノードはどれもこのタスクを実行できません：', '所选节点都不能运行这个任务：', 'None of the selected agents can run this job: '),
+    ('、', '；', '; '),
+    ('このタスクは一部のノードの上限を超えているため、そのまま送るとノードに拒否されます：', '这次任务超过了部分节点的上限，直接发送会被节点拒绝：', 'This job is over the limits of some agents, which would refuse it:'),
+    ('各ノードの上限内で実行できます。キャンセルして負荷テストの設定を下げるか、サーバーの agent.json で上限を上げてからノードを再起動することもできます。', '可以按各节点的上限运行；也可以取消，调低压力测试页的设置，或在服务器的 agent.json 里调高上限后重启节点。', "Run it within each agent's limits, or cancel and lower the Stress page settings, or raise the limits in agent.json on the server and restart the agent."),
+    ('ノードの上限を超えています', '超出节点上限', "Over the agents' limits"),
+    ('キャンセルしました：タスクがノードの上限を超えています。', '已取消：任务超出节点上限。', "Cancelled: the job is over the agents' limits."),
+    ('上限 {#0} QPS · {#1} 秒 · {#2} スレッド', '上限 {#0} QPS · {#1} 秒 · {#2} 线程', 'Limits {#0} QPS · {#1} s · {#2} threads'),
+    ('{#0} プロトコルに対応していません', '不支持 {#0} 协议', 'does not support {#0}'),
+    ('レート {#0} QPS（上限 {#1}）', '速率 {#0} QPS（上限 {#1}）', 'rate {#0} QPS (limit {#1})'),
+    ('時間 {#0} 秒（上限 {#1}）', '时长 {#0} 秒（上限 {#1}）', 'duration {#0} s (limit {#1})'),
+    ('スレッド {#0}（上限 {#1}）', '线程 {#0}（上限 {#1}）', 'threads {#0} (limit {#1})'),
+    ('パケット {#0} バイト（上限 {#1}）', '数据包 {#0} 字节（上限 {#1}）', 'packet size {#0} bytes (limit {#1})'),
+    ('• {#0}：{#1}（スキップします）', '• {#0}：{#1}，将跳过', '• {#0}: {#1}; it will be skipped'),
+    ('ノード {#0} は上限内で実行します：{#1} QPS、{#2} 秒、{#3} スレッド', '节点 {#0} 按上限运行：{#1} QPS、{#2} 秒、{#3} 线程', 'Agent {#0} runs within its limits: {#1} QPS, {#2} s, {#3} threads'),
+    ('サーバーノード {#0} がタスクを拒否しました：{#1}', '服务器节点 {#0} 拒绝了任务：{#1}', 'Server node {#0} refused the job: {#1}'),
+    ('ノードの上限：毎秒最大 {#0} リクエスト、1 タスク最長 {#1} 秒、最大 {#2} スレッド。変更するには、サーバーの agent.json で max_rate、max_duration、max_threads を編集してからノードを再起動してください。', '节点上限：每秒最多 {#0} 次请求，单个任务最长 {#1} 秒，最多 {#2} 个线程。要调整，就改服务器上 agent.json 里的 max_rate、max_duration、max_threads，然后重启节点。', 'Agent limits: at most {#0} requests per second, {#1} s per job and {#2} threads. To change them, edit max_rate, max_duration and max_threads in agent.json on the server, then restart the agent.'),
 ]
 _EXTRA = {
     "Japanese Language Pack": "日本語言語パック",
@@ -1057,7 +1086,7 @@ def uninstall():
 class Plugin(FlowBenchPlugin):
     name = ("日语语言包", "Japanese Language Pack")
     title = "日本語言語パック"
-    version = "1.0.9"
+    version = "1.0.10"
     author = "FlowBench"
     description = (
         "将 FlowBench 1.2.10 的界面、对话框和动态提示转换为日语，兼容深浅色主题；启用即生效。",
