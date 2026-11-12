@@ -15,6 +15,10 @@
 - The high-rate confirmation asks about the rate actually sent, after lowering to the servers' limits.
 - Japanese language pack 1.0.10 translates the new messages.
 
+### Fixed
+
+- The app no longer stutters for minutes after a heavy local test. The Monitor's TCP connection count listed every connection through psutil once a second, holding Python's lock meanwhile, and a heavy test leaves tens of thousands of connections waiting to close (TIME_WAIT) for about four minutes on Windows. The count now comes from the system's own totals in one call: Windows' TCP statistics, or `/proc/net/sockstat` on Linux, where it took 2.5 ms instead of 197 ms even with only 50 connections. If only the slow way works and it takes long, it runs every 10 seconds instead of every second. On Windows the count now leaves out listening sockets.
+
 ## [1.2.14] - 2026-11-12
 
 ### Added
