@@ -944,7 +944,7 @@ class AgentView(ScrollArea):
                 self._show_error(str(exc))
                 return
             self._async("generate", lambda: self._provision_and_package(
-                client, name, str(output_path), limits))
+                client, name, str(output_path), limits, hub_url=url))
             return
 
         public_address = dialog.server_address()
@@ -1269,7 +1269,11 @@ exec python3 agent/server_agent.py --config agent/agent.json
             "ca_file": "",
         }
 
-    def _provision_and_package(self, client, name, output, limits=None):
+    def _provision_and_package(self, client, name, output, limits=None, hub_url=None):
+        """Runs on a worker thread when ``hub_url`` is given; without it the
+        Hub field is read, which only the GUI thread may do."""
+        if hub_url is None:
+            hub_url = self.hubEdit.text()
         limits = self._node_limits(limits)
         record = client.provision_agent(name)
         exe, linux_root = self._node_payload_paths()
@@ -1280,7 +1284,7 @@ exec python3 agent/server_agent.py --config agent/agent.json
                                       "The installed app is missing agent payload files; rebuild the main app."))
         allowed_targets = sorted({str(item.get("host")) for item in settings.authorized if item.get("host")})
         agent_config = {
-            "hub_url": self.hubEdit.text().strip().rstrip("/"),
+            "hub_url": str(hub_url).strip().rstrip("/"),
             "agent_id": record["agent_id"],
             "token": record["token"],
             "allowed_targets": allowed_targets,

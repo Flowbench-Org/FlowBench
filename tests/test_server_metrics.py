@@ -462,6 +462,17 @@ class NodeBundleTests(unittest.TestCase):
         view._provision_and_package(client, "node", out)
         self.check_bundle(out, "linux/")
 
+    def test_hub_bundle_made_on_a_worker_thread_uses_the_address_it_was_given(self):
+        view, folder = self.make_view()
+        view.hubEdit.setText("https://typed-meanwhile.example.com")
+        client = types.SimpleNamespace(provision_agent=lambda name: {
+            "agent_id": "server-1", "token": "agent-token-1234567890"})
+        out = folder / "hub.zip"
+        with patch.object(type(view.hubEdit), "text", side_effect=AssertionError("read off the GUI thread")):
+            view._provision_and_package(client, "node", out, hub_url="https://hub.example.com/")
+        with zipfile.ZipFile(out) as bundle:
+            self.assertEqual(json.loads(bundle.read("linux/agent.json"))["hub_url"], "https://hub.example.com")
+
 
 if __name__ == "__main__":
     unittest.main()
