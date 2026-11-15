@@ -50,6 +50,7 @@ LINUX_AGENT_FILES = (
     "server_agent.py",
     "agent/__init__.py",
     "agent/worker.py",
+    "agent/engine_bridge.py",
     "agent/transport.py",
     "agent/relay.py",
     "agent/sysmetrics.py",

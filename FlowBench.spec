@@ -19,6 +19,7 @@ a = Analysis(
         ('server_agent.py', 'agent_template/linux'),
         ('agent/hub.py', 'agent_template/linux/agent'),
         ('agent/worker.py', 'agent_template/linux/agent'),
+        ('agent/engine_bridge.py', 'agent_template/linux/agent'),
         ('agent/transport.py', 'agent_template/linux/agent'),
         ('agent/relay.py', 'agent_template/linux/agent'),
         ('agent/sysmetrics.py', 'agent_template/linux/agent'),
