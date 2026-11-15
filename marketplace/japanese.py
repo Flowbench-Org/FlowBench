@@ -1,4 +1,4 @@
-"""Standalone Japanese interface pack for FlowBench 1.2.10.
+"""Standalone Japanese interface pack for FlowBench.
 
 Import this file from the local plugin page. Enable only one language pack
 at a time. Disable the pack and restart to fully restore the host language.
@@ -147,6 +147,20 @@ _RESOURCES = [
     ('先にノードを選択してください', '请先选择节点', 'Select an agent first'),
     ('ノード {#0} 台を読み込みました', '已加载 {#0} 个节点', 'Loaded {#0} agent(s)'),
     ('ノード一覧を更新しました：{#0} 台。', '已刷新节点列表，共 {#0} 个节点。', 'Agent list refreshed: {#0} agent(s).'),
+    ('{#0} 件を選択中', '已选择 {#0} 个', '{#0} selected'),
+    (' · {#0}/{#1} 件を表示', ' · 显示 {#0}/{#1}', ' · showing {#0}/{#1}'),
+    ('サーバー {#0} 台を選択中…', '已选 {#0} 个服务器…', '{#0} servers selected…'),
+    ('ノード {#0} 台を選択中', '已选择 {#0} 个节点', '{#0} agent(s) selected'),
+    ('サーバーノード {#0} 台を選択しました。', '已选择 {#0} 个服务器节点。', 'Selected {#0} server agent(s).'),
+    ('ノード {#0} の{#1}に失敗しました：{#2}', '节点 {#0} {#1}失败：{#2}', 'Agent {#0} failed to {#1}: {#2}'),
+    ('{#0} 台のノードに{#1}コマンドを送信しました。失敗 {#2} 台。', '已向 {#0} 个节点发送{#1}命令，失败 {#2} 个。', 'Sent {#1} command to {#0} agent(s); {#2} failed.'),
+    ('成功 {#0} 台、失敗 {#1} 台。', '成功 {#0} 个，失败 {#1} 个。', '{#0} succeeded, {#1} failed.'),
+    ('{#0}コマンドを実行できたノードはありません。', '没有节点成功执行{#0}命令。', 'No agent accepted the {#0} command.'),
+    ('{#0} 台のノードに{#1}コマンドを送信しました。', '已向 {#0} 个节点发送{#1}命令。', 'Sent the {#1} command to {#0} agent(s).'),
+    ('シングルインスタンスサーバーを起動できませんでした：{#0}', '单实例服务器启动失败: {#0}', 'Single-instance server failed to start: {#0}'),
+    ('FlowBench を起動しました。', 'FlowBench 启动。', 'FlowBench started.'),
+    ('免責事項に同意しました。', '用户已同意免责声明。', 'Disclaimer accepted.'),
+    ('免責事項に同意されなかったため終了します。', '用户未同意免责声明，程序退出。', 'Disclaimer not accepted; exiting.'),
     ('ログなし', '暂无日志', 'No log'),
     ('コピーできるログがありません', '当前没有可复制的日志', 'There is no log to copy'),
     ('対象 {#0} が認可されていないため、サーバーテストをブロックしました', '目标 {#0} 未授权，服务器任务已阻止', 'Target {#0} is not authorized; server job blocked'),
@@ -1094,8 +1108,8 @@ class Plugin(FlowBenchPlugin):
     version = "1.0.11"
     author = "FlowBench"
     description = (
-        "将 FlowBench 1.2.10 的界面、对话框和动态提示转换为日语，兼容深浅色主题；启用即生效。",
-        "Japanese UI, dialogs and dynamic messages for FlowBench 1.2.10; supports light and dark themes."
+        "将 FlowBench 的界面、对话框和动态提示转换为日语，兼容深浅色主题；启用即生效。",
+        "Japanese UI, dialogs and dynamic messages for FlowBench; supports light and dark themes."
     )
     icon = "LANGUAGE"
     category = "ui"
