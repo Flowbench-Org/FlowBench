@@ -625,6 +625,26 @@ class SetupWindowTests(unittest.TestCase):
         self.assertIn(("launch", str(self.target / "FlowBench.exe"), []), self.platform.calls)
         self.assertFalse(win.isVisible())
 
+    def test_failed_extraction_offers_another_folder(self):
+        win = self.wizard()
+        win.startButton.click()
+        with mock.patch.object(core, "extract_payload",
+                               side_effect=PermissionError(13, "Permission denied")):
+            win.installButton.click()
+            self.assertTrue(wait_for(lambda: win.retryButton.isVisible(), 10000))
+        self.assertIn("No permission to write", win.progressError.text())
+        self.assertTrue(win.changeButton.isVisible())
+        self.assertEqual(list((self.root / "Programs").iterdir()), [])     # nothing left behind
+        win.changeButton.click()
+        self.assertIs(win.pages.currentWidget(), win.locationPage)
+        other = self.root / "Other" / "FlowBench"
+        win.pathEdit.setText(str(other))
+        win.installButton.click()
+        self.assertTrue(wait_for(lambda: win.pages.currentWidget() is win.donePage, 10000))
+        self.assertTrue((other / "FlowBench.exe").exists())
+        self.assertFalse(self.target.exists())
+        win.close()
+
     def test_finish_closes_without_opening_flowbench(self):
         win = self.wizard()
         win.startButton.click()

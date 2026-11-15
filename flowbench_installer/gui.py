@@ -617,7 +617,12 @@ class SetupWindow(InstallerWindow):
         self.bilingual(self.retryButton, "重试", "Retry")
         self.retryButton.clicked.connect(self._retry)
         self.retryButton.hide()
-        self._button_row(layout, self.stopButton, self.retryButton)
+        self.changeButton = TransparentPushButton(FluentIcon.LEFT_ARROW, "", page)
+        self.bilingual(self.changeButton, "更改安装位置", "Choose another folder")
+        self.changeButton.clicked.connect(self._change_location)
+        self.changeButton.hide()
+        self._button_row(layout, self.stopButton, self.retryButton, leading=self.changeButton)
+        self.changeButton.setMinimumWidth(0)
         return page
 
     def _build_done_page(self):
@@ -851,7 +856,22 @@ class SetupWindow(InstallerWindow):
             self._set_elided(self.progressDetail, self._progress_text())
         self.progressError.setVisible(failed)
         self.retryButton.setVisible(failed)
+        # Nothing was put in place yet, so another folder can be chosen.
+        self.changeButton.setVisible(failed and self._retry_stage)
         self.percentLabel.setText("" if failed else f"{self._progress[0]}%")
+
+    def _change_location(self):
+        """Back to the location page after setup failed before anything was
+        put in place, e.g. no permission or no space in that folder."""
+        if self.busy:
+            return
+        if self.session:
+            self.session.discard()
+        self.progressBar.resume()
+        self.phase = "location"
+        self._refresh_location()
+        self.pages.setCurrentWidget(self.locationPage, back=True)
+        self.clock.boost(0.6)
 
     def _cancel_install(self):
         if self.worker and self.busy:
