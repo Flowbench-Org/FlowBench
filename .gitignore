@@ -29,3 +29,7 @@ agent.json
 hub.json
 controller.json
 *.state.json
+
+# 原生引擎构建产物（根目录暂存，不入库）
+/flowbench-engine
+/flowbench-engine.exe

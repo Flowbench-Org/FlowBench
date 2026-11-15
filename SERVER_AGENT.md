@@ -144,6 +144,27 @@ The **Generate Server Node** dialog sets the rate, duration and thread limits (1
 
 The Agent reports its limits to the desktop when it comes online. Before **Start on server**, the desktop checks the job from the Stress page against each selected server: if the job is over a server's limits, it lists what is over and offers to run it within each server's limits (each server gets the job lowered to its own limits) or to cancel. Servers that do not support the job's protocol are skipped. An Agent from an older FlowBench does not report its limits and is sent the job as it is. When a server refuses a job, the Server Agents page shows why next to the server and in its log.
 
+### Engine (native)
+
+The hot path — the connection pool and the rate‑limited send loop — can run in a
+native Rust engine (`flowbench-engine`) instead of the built‑in Python worker. It
+is a child process the Agent drives over stdin/stdout; the protocol is in
+[`ENGINE.md`](ENGINE.md). Authorization, the protocol allow‑list and every limit
+above are still enforced by the Agent **before** a job reaches the engine, so the
+native path adds no way around them, and the engine stops the moment the Agent
+goes away.
+
+`agent.json` key `engine`:
+
+- `auto` (default) — use the native engine when its binary is bundled or found, otherwise the Python worker.
+- `rust` — require the native engine; a job fails if it is missing.
+- `python` — always use the Python worker.
+
+A node bundle built with the Rust toolchain present ships the engine inside
+`FlowBench-Agent.exe`; one built without it runs the Python worker, and both look
+the same to the desktop. Set `engine_path` to the binary, or the `FLOWBENCH_ENGINE`
+environment variable, to point at it explicitly.
+
 ### System metrics
 
 The Agent samples its server's CPU usage, memory, network throughput (loopback left out), TCP connections and processes once a second and sends the last 15 seconds with every heartbeat. While metrics are on, a heartbeat goes out every `metrics_interval` seconds (default `2`, from 1 to 60). Add `"metrics": false` to turn them off and go back to `heartbeat_interval`.
