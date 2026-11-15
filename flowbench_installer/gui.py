@@ -545,7 +545,13 @@ class SetupWindow(InstallerWindow):
         self.pathEdit = LineEdit(card)
         self.pathEdit.setText(str(self.target))
         self.pathEdit.setClearButtonEnabled(False)
-        self.pathEdit.textChanged.connect(self._refresh_location)
+        # Looking at a folder can take seconds on a network drive, so the
+        # checks wait until typing pauses instead of running on every key.
+        self._locationTimer = QTimer(self)
+        self._locationTimer.setSingleShot(True)
+        self._locationTimer.setInterval(350)
+        self._locationTimer.timeout.connect(self._refresh_location)
+        self.pathEdit.textChanged.connect(self._on_path_edited)
         self.browseButton = PushButton(card)
         self.bilingual(self.browseButton, "更改…", "Browse…")
         self.browseButton.clicked.connect(self._browse)
@@ -703,9 +709,15 @@ class SetupWindow(InstallerWindow):
             if path.name.lower() != core.APP_NAME.lower():
                 path = path / core.APP_NAME
             self.pathEdit.setText(str(path))
+            self._refresh_location()
 
     def _use_default_target(self):
         self.pathEdit.setText(str(self.default_target))
+        self._refresh_location()
+
+    def _on_path_edited(self, _text=None):
+        self.defaultButton.setVisible(not same_path(self.chosen_target(), self.default_target))
+        self._locationTimer.start()
 
     def _legacy_installs(self):
         if self._legacy is None:
@@ -716,6 +728,7 @@ class SetupWindow(InstallerWindow):
     def _refresh_location(self):
         if self.update_mode:
             return
+        self._locationTimer.stop()
         target = self.chosen_target()
         existing = core.read_marker(target) if target.is_dir() else {}
         installed = existing.get("version") or ""
@@ -771,6 +784,7 @@ class SetupWindow(InstallerWindow):
     # -- wizard flow ---------------------------------------------------------
 
     def start_install(self):
+        self._locationTimer.stop()
         target = self.chosen_target()
         try:
             core.check_target(target)
