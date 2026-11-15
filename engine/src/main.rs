@@ -284,9 +284,31 @@ fn error_chain(err: &reqwest::Error) -> String {
     text
 }
 
+fn classify_io(err: &std::io::Error) -> String {
+    use std::io::ErrorKind;
+    match err.kind() {
+        ErrorKind::TimedOut => "timeout",
+        ErrorKind::ConnectionRefused => "refused",
+        ErrorKind::ConnectionReset => "reset",
+        ErrorKind::ConnectionAborted => "closed",
+        ErrorKind::AddrNotAvailable | ErrorKind::AddrInUse => "addr",
+        _ => return classify_text(&err.to_string()),
+    }
+    .to_string()
+}
+
 fn classify_reqwest(err: &reqwest::Error) -> String {
     if err.is_timeout() {
         return "timeout".to_string();
+    }
+    // Prefer the OS error kind (locale-independent) over English substrings.
+    let mut source: Option<&(dyn std::error::Error + 'static)> =
+        Some(err as &(dyn std::error::Error + 'static));
+    while let Some(cause) = source {
+        if let Some(io) = cause.downcast_ref::<std::io::Error>() {
+            return classify_io(io);
+        }
+        source = cause.source();
     }
     classify_text(&error_chain(err))
 }
@@ -324,26 +346,34 @@ async fn do_request(client: &reqwest::Client, cfg: &JobConfig) -> (bool, Option<
                 Err(e) => (false, Some(classify_reqwest(&e)), 0),
             }
         }
-        _ => {
+        "TCP" => {
             let payload = vec![b'X'; cfg.packet_size.max(1) as usize];
             let sent = payload.len() as u64;
             let addr = format!("{}:{}", cfg.target, cfg.port);
             let timeout = Duration::from_millis(cfg.timeout);
-            let attempt = async {
-                let mut stream = tokio::net::TcpStream::connect(addr.as_str())
-                    .await
-                    .map_err(|e| e.to_string())?;
-                stream.write_all(&payload).await.map_err(|e| e.to_string())?;
-                let mut buf = [0u8; 1];
-                let _ = tokio::time::timeout(timeout, stream.read(&mut buf)).await;
-                Ok::<(), String>(())
+            // Connect and write each get their own timeout; a load target may
+            // never reply, so sending the packet counts as success (like the
+            // Python worker's recv() timeout).
+            let mut stream = match tokio::time::timeout(
+                timeout,
+                tokio::net::TcpStream::connect(addr.as_str()),
+            )
+            .await
+            {
+                Ok(Ok(stream)) => stream,
+                Ok(Err(e)) => return (false, Some(classify_io(&e)), 0),
+                Err(_) => return (false, Some("timeout".to_string()), 0),
             };
-            match tokio::time::timeout(timeout, attempt).await {
-                Ok(Ok(())) => (true, None, sent),
-                Ok(Err(e)) => (false, Some(classify_text(&e)), 0),
-                Err(_) => (false, Some("timeout".to_string()), 0),
+            match tokio::time::timeout(timeout, stream.write_all(&payload)).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => return (false, Some(classify_io(&e)), 0),
+                Err(_) => return (false, Some("timeout".to_string()), 0),
             }
+            let mut buf = [0u8; 1];
+            let _ = tokio::time::timeout(timeout, stream.read(&mut buf)).await;
+            (true, None, sent)
         }
+        _ => (false, Some("unsupported protocol".to_string()), 0),
     }
 }
 
@@ -407,6 +437,8 @@ async fn run_job(cfg: JobConfig, stop: Arc<AtomicBool>, out: Out) {
 
     let client = match reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
+        .no_proxy() // never route load through an env/system proxy
+        .redirect(reqwest::redirect::Policy::none()) // stay on the authorized host
         .pool_max_idle_per_host(threads as usize)
         .user_agent("FlowBench-Engine")
         .build()
@@ -450,10 +482,13 @@ async fn run_job(cfg: JobConfig, stop: Arc<AtomicBool>, out: Out) {
         if !limiter.acquire(&stop, deadline).await {
             break;
         }
-        let permit = match sem.clone().acquire_owned().await {
-            Ok(permit) => permit,
-            Err(_) => break,
+        let permit = match tokio::time::timeout_at(deadline, sem.clone().acquire_owned()).await {
+            Ok(Ok(permit)) => permit,
+            _ => break, // deadline reached or semaphore closed
         };
+        if stop.load(Ordering::Relaxed) {
+            break;
+        }
         let stats = stats.clone();
         let cfg = cfg.clone();
         let client = client.clone();
@@ -466,6 +501,9 @@ async fn run_job(cfg: JobConfig, stop: Arc<AtomicBool>, out: Out) {
         });
     }
 
+    // The test window ends here; time spent draining in-flight requests is
+    // not test time (matches the Python engine).
+    let ended = Instant::now().min(deadline);
     stop.store(true, Ordering::Relaxed);
     snap.abort();
 
@@ -474,7 +512,7 @@ async fn run_job(cfg: JobConfig, stop: Arc<AtomicBool>, out: Out) {
     let _ = tokio::time::timeout(grace, sem.acquire_many(threads)).await;
 
     // Final report.
-    let elapsed = t0.elapsed().as_secs_f64();
+    let elapsed = ended.duration_since(t0).as_secs_f64();
     let mut lats = stats.latencies.lock().await.clone();
     lats.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let avg = if lats.is_empty() {
@@ -532,14 +570,14 @@ async fn main() {
                 }
                 match serde_json::from_str::<Command>(trimmed) {
                     Ok(Command::Start { config, .. }) => break config,
-                    Ok(Command::Stop) => return,
+                    Ok(Command::Stop) => std::process::exit(0),
                     Err(e) => {
                         emit(&out, &Event::Error { message: format!("bad command: {e}") }).await;
                     }
                 }
             }
-            Ok(None) => return, // EOF before any job
-            Err(_) => return,
+            Ok(None) => std::process::exit(0), // EOF before any job
+            Err(_) => std::process::exit(0),
         }
     };
 
@@ -567,4 +605,8 @@ async fn main() {
 
     run_job(cfg, stop.clone(), out.clone()).await;
     watcher.abort();
+    // tokio's blocking stdin read cannot be cancelled, so a normal return
+    // would hang on runtime shutdown. Exit explicitly now that the report
+    // has been flushed.
+    std::process::exit(0);
 }
