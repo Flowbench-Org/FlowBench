@@ -47,7 +47,7 @@ per job on the Python side).
 | `rate`        | number | requests/sec (token bucket)                  |
 | `duration`    | number | seconds                                      |
 | `threads`     | int    | max concurrent requests                      |
-| `packet_size` | int    | TCP payload bytes; HTTP tx estimate          |
+| `packet_size` | int    | TCP payload bytes (HTTP tx is estimated from headers) |
 | `timeout`     | int    | per-request timeout, ms                      |
 | `headers`     | object | optional HTTP headers                        |
 
@@ -62,8 +62,12 @@ per job on the Python side).
 
 `snapshot` and `report` carry exactly the keys the Python callbacks
 (`AgentRuntime._on_snapshot` / `_on_report`) already consume, so the native
-engine is a drop-in for the Python worker. `protocol` in `hello` is the version
-of this contract; the bridge refuses an engine whose number it does not know.
+engine drops into the same aggregator. A few semantics still differ from the
+Python worker: `active` is the number of in-flight requests (not live threads),
+redirects are not followed and no proxy is used, and on the desktop TCP stays on
+the Python engine (its per-thread connection reuse avoids port exhaustion at high
+QPS). `protocol` in `hello` is the version of this contract; the bridge refuses an
+engine whose number it does not know.
 
 ## Choosing the engine
 
@@ -75,8 +79,11 @@ of this contract; the bridge refuses an engine whose number it does not know.
 - `python` — always use the built-in Python worker.
 
 The binary is located, in order: `FLOWBENCH_ENGINE` env var, the `engine_path`
-config key, next to the agent executable, the PyInstaller bundle dir, then
-`engine/target/release/` in a source checkout.
+config key, next to the (frozen) executable, the PyInstaller bundle dir, then
+`engine/target/release/` or the repo root in a source checkout. Relative
+`FLOWBENCH_ENGINE`/`engine_path` values are resolved to absolute paths. The
+desktop app reads the same `engine` mode from its settings (`engine` in
+`settings.json`, default `auto`) and uses the native engine only for HTTP/HTTPS.
 
 ## Shipping the engine to nodes
 

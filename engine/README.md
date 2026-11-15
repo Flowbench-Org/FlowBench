@@ -29,7 +29,8 @@ as `flowbench-engine.exe` so PyInstaller can bundle it.
 ## Run standalone (for debugging)
 
 ```
-echo '{"type":"start","config":{"target":"localhost","protocol":"HTTP","url":"http://localhost:8000/","port":80,"rate":5,"duration":3,"threads":2,"packet_size":64,"timeout":2000}}' | ./target/release/flowbench-engine
+# Keep stdin open for the job's duration; an immediate EOF stops it (EOF == stop).
+(echo '{"type":"start","config":{"target":"localhost","protocol":"HTTP","url":"http://localhost:8000/","port":80,"rate":5,"duration":3,"threads":2,"packet_size":64,"timeout":2000}}'; sleep 4) | ./target/release/flowbench-engine
 ```
 
 It prints a `hello` line, then `snapshot` lines every 0.5 s, then one `report`.

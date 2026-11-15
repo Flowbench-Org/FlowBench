@@ -167,6 +167,9 @@ embedded by `FlowBench.spec` and shipped in every generated Linux node bundle be
 `server_agent.py`. A node whose CPU/libc do not match falls back to the Python worker,
 so a missing or mismatched binary is never fatal. `engine_path` or the `FLOWBENCH_ENGINE`
 environment variable point at the binary explicitly; see [`ENGINE.md`](ENGINE.md).
+If you unzip a Linux bundle in a way that drops the executable bit (some tools do),
+run `chmod +x flowbench-engine` beside `server_agent.py`, or the node falls back to
+the Python worker.
 
 ### System metrics
 
