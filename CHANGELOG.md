@@ -11,9 +11,9 @@
 ### Changed
 
 - When a server refuses a job, the Server Agents page says why, in the interface language, next to the server and once in the log, for example "the rate is over the agent's limit (500 > 100)". It used to show only "error", while the reason appeared only in the server's own output.
-- The agent's refusals say by how much a job is over, for example `rate exceeds agent limit: 500 > 100`, and a rate of 0 is reported as such instead of as over the limit. The agent checks its limits when it starts and stops with a clear message if one is not a positive number.
+- The agent's refusals say by how much a job is over, for example `rate exceeds agent limit: 500 > 100`, and a rate, duration, thread count or packet size of 0 or less is reported as such (`duration must be positive`, shown as "the duration must be more than 0") instead of as over the limit. Numbers are written out in full, so a rate of a million reads 1000000 rather than 1e+06, and 100.0000004 is not rounded to look like the limit of 100. The agent checks its limits when it starts and stops with a clear message if one is not a positive number.
 - The high-rate confirmation asks about the rate actually sent, after lowering to the servers' limits.
-- Japanese language pack 1.0.10 translates the new messages.
+- Japanese language pack 1.0.11 translates the new messages.
 
 ### Fixed
 

@@ -24,7 +24,7 @@ import ssl
 from agent.relay import (parse_relay_url, relay_topic, sign_message,
                          verify_message)
 from agent.sysmetrics import SystemSampler
-from agent.transport import compact_json, decode_json, endpoint
+from agent.transport import compact_json, decode_json, endpoint, number_text
 from agent.worker import HeadlessStressJob
 
 DEFAULTS = {
@@ -253,14 +253,17 @@ def validate_job(raw: dict, config: dict):
         raise ValueError("numeric job fields are invalid") from exc
     if not math.isfinite(rate): raise ValueError("rate must be finite")
     # The messages start the same as before, so older desktops still read them.
-    if rate <= 0: raise ValueError("rate must be positive")
+    for name, value in (("rate", rate), ("duration", duration), ("threads", threads),
+                        ("packet_size", packet_size)):
+        if value <= 0:
+            raise ValueError(f"{name} must be positive")
     if rate > float(config["max_rate"]):
-        raise ValueError(f"rate exceeds agent limit: {rate:g} > {float(config['max_rate']):g}")
-    if not (0 < duration <= int(config["max_duration"])):
+        raise ValueError(f"rate exceeds agent limit: {number_text(rate)} > {number_text(config['max_rate'])}")
+    if duration > int(config["max_duration"]):
         raise ValueError(f"duration exceeds agent limit: {duration} > {int(config['max_duration'])}")
-    if not (0 < threads <= int(config["max_threads"])):
+    if threads > int(config["max_threads"]):
         raise ValueError(f"threads exceed agent limit: {threads} > {int(config['max_threads'])}")
-    if not (0 < packet_size <= int(config["max_packet_size"])):
+    if packet_size > int(config["max_packet_size"]):
         raise ValueError(f"packet_size exceeds agent limit: {packet_size} > {int(config['max_packet_size'])}")
     if not (1 <= port <= 65535): raise ValueError("port must be between 1 and 65535")
     if not (100 <= timeout <= 60000): raise ValueError("timeout must be between 100 and 60000 ms")

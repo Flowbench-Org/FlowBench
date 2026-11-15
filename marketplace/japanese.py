@@ -791,6 +791,10 @@ _RESOURCES = [
     ('ノードはこのプロトコルに対応していません', '节点不支持这个协议', 'the agent does not support this protocol'),
     ('対象がノードの許可リストにありません', '目标不在节点的授权列表里', "the target is not on the agent's allow-list"),
     ('ノードではすでにタスクが実行中です', '节点上已经有任务在运行', 'a job is already running on the agent'),
+    ('レートは 0 より大きくする必要があります', '速率必须大于 0', 'the rate must be more than 0'),
+    ('時間は 0 より大きくする必要があります', '时长必须大于 0', 'the duration must be more than 0'),
+    ('スレッド数は 0 より大きくする必要があります', '线程数必须大于 0', 'the thread count must be more than 0'),
+    ('パケットサイズは 0 より大きくする必要があります', '数据包大小必须大于 0', 'the packet size must be more than 0'),
     ('上限内で実行', '按上限运行', 'Run within limits'),
     ('、', '、', ', '),
     ('選択したノードはどれもこのタスクを実行できません：', '所选节点都不能运行这个任务：', 'None of the selected agents can run this job: '),
@@ -1086,7 +1090,7 @@ def uninstall():
 class Plugin(FlowBenchPlugin):
     name = ("日语语言包", "Japanese Language Pack")
     title = "日本語言語パック"
-    version = "1.0.10"
+    version = "1.0.11"
     author = "FlowBench"
     description = (
         "将 FlowBench 1.2.10 的界面、对话框和动态提示转换为日语，兼容深浅色主题；启用即生效。",

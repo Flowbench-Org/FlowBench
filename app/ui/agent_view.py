@@ -32,6 +32,7 @@ from qfluentwidgets import (BodyLabel, CaptionLabel, CheckBox, ComboBox, Compact
                             SimpleCardWidget, StrongBodyLabel, SubtitleLabel,
                             getFont, isDarkTheme, themeColor, Theme)
 
+from agent.transport import number_text
 from app.services import agent_limits
 from app.services.agent_control import ControllerClient, RelayControllerClient
 from app.services.remote_monitor import remote_monitor
@@ -100,8 +101,8 @@ def agent_os(agent) -> str:
 
 def limits_text(limits) -> str:
     """An agent's reported limits in one line."""
-    return L(f"上限 {limits['max_rate']:g} QPS · {limits['max_duration']} 秒 · {limits['max_threads']} 线程",
-             f"Limits {limits['max_rate']:g} QPS · {limits['max_duration']} s · {limits['max_threads']} threads")
+    return L(f"上限 {number_text(limits['max_rate'])} QPS · {limits['max_duration']} 秒 · {limits['max_threads']} 线程",
+             f"Limits {number_text(limits['max_rate'])} QPS · {limits['max_duration']} s · {limits['max_threads']} threads")
 
 
 def problem_text(field, asked, allowed) -> str:
@@ -109,7 +110,8 @@ def problem_text(field, asked, allowed) -> str:
     if field == "protocol":
         return L(f"不支持 {asked} 协议", f"does not support {asked}")
     if field == "rate":
-        return L(f"速率 {asked:g} QPS（上限 {allowed:g}）", f"rate {asked:g} QPS (limit {allowed:g})")
+        asked, allowed = number_text(asked), number_text(allowed)
+        return L(f"速率 {asked} QPS（上限 {allowed}）", f"rate {asked} QPS (limit {allowed})")
     if field == "duration":
         return L(f"时长 {asked} 秒（上限 {allowed}）", f"duration {asked} s (limit {allowed})")
     if field == "threads":
@@ -124,6 +126,13 @@ def refusal_text(error) -> str:
     if found is None:
         return str(error)
     kind, asked, limit = found
+    if kind == "not_positive":
+        return {
+            "rate": L("速率必须大于 0", "the rate must be more than 0"),
+            "duration": L("时长必须大于 0", "the duration must be more than 0"),
+            "threads": L("线程数必须大于 0", "the thread count must be more than 0"),
+            "packet_size": L("数据包大小必须大于 0", "the packet size must be more than 0"),
+        }[asked]
     reason = {
         "rate": L("速率超过节点上限", "the rate is over the agent's limit"),
         "duration": L("时长超过节点上限", "the duration is over the agent's limit"),
@@ -1010,10 +1019,10 @@ class AgentView(ScrollArea):
     def _limits_note(limits):
         """The README's paragraph about the node's limits."""
         return "\n\n" + L(
-            f"节点上限：每秒最多 {limits['max_rate']:g} 次请求，单个任务最长 {limits['max_duration']} 秒，"
+            f"节点上限：每秒最多 {number_text(limits['max_rate'])} 次请求，单个任务最长 {limits['max_duration']} 秒，"
             f"最多 {limits['max_threads']} 个线程。要调整，就改服务器上 agent.json 里的 "
             "max_rate、max_duration、max_threads，然后重启节点。",
-            f"Agent limits: at most {limits['max_rate']:g} requests per second, "
+            f"Agent limits: at most {number_text(limits['max_rate'])} requests per second, "
             f"{limits['max_duration']} s per job and {limits['max_threads']} threads. To change them, "
             "edit max_rate, max_duration and max_threads in agent.json on the server, then restart the agent.")
 
@@ -1450,9 +1459,9 @@ exec python3 agent/server_agent.py --config agent/agent.json
     def _confirm_high_rate(self, host, rate) -> bool:
         confirm = MessageBox(
             L("高请求速率二次确认", "High Rate Confirmation"),
-            L(f"服务器节点将使用压力测试页配置向 {host} 发送最高 {rate:g} QPS。\n"
+            L(f"服务器节点将使用压力测试页配置向 {host} 发送最高 {number_text(rate)} QPS。\n"
               "请再次确认目标已获授权且能够承受该速率。",
-              f"The server agent will use the Stress page configuration against {host}, up to {rate:g} QPS.\n"
+              f"The server agent will use the Stress page configuration against {host}, up to {number_text(rate)} QPS.\n"
               "Confirm that the target is authorized and can handle this rate."),
             self.window())
         return bool(confirm.exec())
@@ -1502,8 +1511,8 @@ exec python3 agent/server_agent.py --config agent/agent.json
             self._log(L("已取消：任务超出节点上限。", "Cancelled: the job is over the agents' limits."))
             return None
         for name, fitted in lowered:
-            self._log(L(f"节点 {name} 按上限运行：{fitted['rate']:g} QPS、{fitted['duration']} 秒、{fitted['threads']} 线程",
-                        f"Agent {name} runs within its limits: {fitted['rate']:g} QPS, "
+            self._log(L(f"节点 {name} 按上限运行：{number_text(fitted['rate'])} QPS、{fitted['duration']} 秒、{fitted['threads']} 线程",
+                        f"Agent {name} runs within its limits: {number_text(fitted['rate'])} QPS, "
                         f"{fitted['duration']} s, {fitted['threads']} threads"))
         return jobs
 

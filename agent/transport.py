@@ -1,6 +1,7 @@
 """Shared protocol helpers for the FlowBench server-agent control plane."""
 from __future__ import annotations
 
+import decimal
 import json
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
@@ -33,3 +34,10 @@ def decode_json(raw: bytes):
         return json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ProtocolError("control-plane returned invalid JSON") from exc
+
+
+def number_text(value) -> str:
+    """A number for a message, written out in full: 1000000 rather than
+    1e+06, 100.0000004 rather than 100, and no needless ".0"."""
+    text = format(decimal.Decimal(repr(float(value))), "f")
+    return text.rstrip("0").rstrip(".") if "." in text else text
