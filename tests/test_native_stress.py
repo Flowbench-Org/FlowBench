@@ -3,7 +3,6 @@
 Uses a fake engine script in place of the Rust binary (no Rust, no network),
 and drives a real Qt event loop so the queued snapshot/report signals arrive.
 """
-import json
 import os
 import subprocess
 import sys
@@ -83,13 +82,14 @@ class _QtTestCase(unittest.TestCase):
 
 class FactorySelectionTests(_QtTestCase):
     def test_non_native_protocols_use_the_python_engine(self):
-        for proto in ("UDP", "ICMP", "MY_PLUGIN_PROTO"):
+        # TCP stays on the Python engine on the desktop (connection reuse).
+        for proto in ("UDP", "ICMP", "TCP", "tcp", "MY_PLUGIN_PROTO"):
             engine = stress.make_child_engine({"protocol": proto})
             self.assertIsInstance(engine, stress.StressEngine)
 
-    def test_native_protocols_use_the_adaptive_engine_in_auto(self):
+    def test_http_protocols_use_the_adaptive_engine_in_auto(self):
         with mock.patch.object(stress, "_engine_mode", return_value="auto"):
-            for proto in ("HTTP", "HTTPS", "TCP", "tcp"):
+            for proto in ("HTTP", "HTTPS", "https"):
                 engine = stress.make_child_engine({"protocol": proto})
                 self.assertIsInstance(engine, stress._AdaptiveStressEngine)
 
@@ -158,6 +158,13 @@ class AdaptiveEngineTests(_QtTestCase):
         self.assertTrue(got_ready)
         engine.stop()
         self.assertTrue(engine._impl.stopped)
+
+    def test_double_start_is_refused(self):
+        engine = stress._AdaptiveStressEngine()
+        with mock.patch.object(engine_bridge, "find_engine_binary", return_value=None), \
+             mock.patch.object(stress, "StressEngine", _DummyStressEngine):
+            self.assertTrue(engine.start(self.CONFIG))
+            self.assertFalse(engine.start(self.CONFIG))
 
     def test_require_native_fails_without_a_binary(self):
         engine = stress._AdaptiveStressEngine(require_native=True)

@@ -461,7 +461,11 @@ class StressEngine(QObject):
 # Python StressEngine, and a missing/incompatible binary falls back to it too,
 # so local runs never fail just because the native engine is unavailable.
 
-NATIVE_PROTOCOLS = {"HTTP", "HTTPS", "TCP"}
+# Desktop TCP keeps the Python engine: its per-thread connection reuse avoids
+# the port exhaustion a new connection per request would cause at the high QPS
+# the desktop allows. The agent (capped, per-request Python worker) runs TCP
+# natively too.
+NATIVE_PROTOCOLS = {"HTTP", "HTTPS"}
 
 
 def _engine_mode():
@@ -557,6 +561,8 @@ class _AdaptiveStressEngine(QObject):
         self._impl = None      # StressEngine when falling back
 
     def start(self, config) -> bool:
+        if self._job is not None or self._impl is not None:
+            return False
         self.config = dict(config) if isinstance(config, dict) else config
         if _valid_native_config(config) and self._start_native(config):
             return True
@@ -587,6 +593,7 @@ class _AdaptiveStressEngine(QObject):
         impl = StressEngine()
         impl.snapshot.connect(self.snapshot)
         impl.report_ready.connect(self.report_ready)
+        impl.report_ready.connect(lambda _r: setattr(self, "running", False))
         impl.ready.connect(self.ready)
         if impl.start(config):
             self._impl = impl
@@ -693,6 +700,8 @@ class MultiStressEngine(QObject):
 
     def _on_child_ready(self):
         """每个子引擎 worker 全部启动后调用；全部就绪时 emit started。"""
+        if not self.running:
+            return
         self._ready_count += 1
         if self._ready_count >= len(self._children):
             self.started.emit()
@@ -707,10 +716,12 @@ class MultiStressEngine(QObject):
     # ---------- 内部 ----------
 
     def _on_child_snap(self, child, d):
+        if child not in self._children:
+            return   # a late signal from a previous run
         self._snaps[child._idx] = (d, child.config or {})
 
     def _on_child_report(self, child, r):
-        if not self.running:
+        if not self.running or child not in self._children:
             return
         self._reports[child._idx] = r
         if len(self._reports) >= len(self._children):
