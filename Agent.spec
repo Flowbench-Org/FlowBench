@@ -1,13 +1,15 @@
 # -*- mode: python ; coding: utf-8 -*-
 # Cross-platform one-file agent: no Qt/desktop dependency.
 import os
+import sys
 
 # Bundle the native engine when it has been staged (build_engine.ps1 copies it
 # to the repo root). Without it the agent falls back to the Python worker.
 engine_binaries = []
-for _name in ("flowbench-engine.exe", "flowbench-engine"):
-    if os.path.exists(_name):
-        engine_binaries.append((_name, "."))
+_engine_name = "flowbench-engine.exe" if sys.platform.startswith("win") else "flowbench-engine"
+for _cand in (_engine_name, os.path.join("engine", "target", "release", _engine_name)):
+    if os.path.exists(_cand):
+        engine_binaries = [(_cand, ".")]
         break
 
 a = Analysis(

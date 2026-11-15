@@ -8,7 +8,11 @@ Set-Location -LiteralPath $PSScriptRoot
 # Build the native engine first when the Rust toolchain is available; otherwise
 # the agent still builds and uses the Python worker at runtime.
 if (Get-Command cargo -ErrorAction SilentlyContinue) {
-    & (Join-Path $PSScriptRoot "build_engine.ps1")
+    try {
+        & (Join-Path $PSScriptRoot "build_engine.ps1")
+    } catch {
+        Write-Warning "Native engine build failed ($_); building the agent with the Python worker."
+    }
 } else {
     Write-Warning "cargo not found; building without the native engine (Python worker will be used)."
 }

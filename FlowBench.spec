@@ -1,6 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 # FlowBench 打包配置（onedir 模式，再由 tools/make_payload.py 和 Setup.spec 打成自带的安装程序）：
 import os
+import sys
 
 # Optionally embed a prebuilt Linux native engine so generated node bundles
 # can ship it to Linux servers. Build it (cargo build --release, on Linux or
@@ -14,8 +15,8 @@ _engine_datas = [(_linux_engine, 'agent_template/linux')] if os.path.isfile(_lin
 # runs (HTTP/HTTPS/TCP). Staged by build_engine.ps1 (repo root) or build_engine.sh
 # (engine/target/release). Absent, local runs use the Python engine.
 _desktop_engine = []
-for _cand in ('flowbench-engine.exe', 'engine/target/release/flowbench-engine.exe',
-              'flowbench-engine', 'engine/target/release/flowbench-engine'):
+_engine_name = 'flowbench-engine.exe' if sys.platform.startswith('win') else 'flowbench-engine'
+for _cand in (_engine_name, os.path.join('engine', 'target', 'release', _engine_name)):
     if os.path.isfile(_cand):
         _desktop_engine = [(_cand, '.')]
         break
