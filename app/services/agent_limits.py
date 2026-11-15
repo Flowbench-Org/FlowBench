@@ -38,9 +38,10 @@ def reported_limits(agent) -> Optional[dict]:
             return None
         try:
             number = kind(value)
+            usable = math.isfinite(number) and number > 0   # a huge int overflows here
         except (TypeError, ValueError, OverflowError):
             return None
-        if not (math.isfinite(number) and number > 0):
+        if not usable:
             return None
         limits[key] = number
     protocols = raw.get("protocols")
@@ -81,11 +82,16 @@ def fit(job: dict, limits: Optional[dict]) -> Optional[dict]:
 
 
 # The reasons an agent gives when it refuses a command (server_agent.py).
+_NUMBER = r"-?[\d.]+(?:[eE][-+]?\d+)?"
+_OVER = rf"(?:: (?P<asked>{_NUMBER}) > (?P<limit>{_NUMBER}))?"
 _REFUSALS = (
-    (r"^rate exceeds agent limit(?:: (?P<asked>[\d.]+) > (?P<limit>[\d.]+))?", "rate"),
-    (r"^duration exceeds agent limit(?:: (?P<asked>\d+) > (?P<limit>\d+))?", "duration"),
-    (r"^threads exceed agent limit(?:: (?P<asked>\d+) > (?P<limit>\d+))?", "threads"),
-    (r"^packet_size exceeds agent limit(?:: (?P<asked>\d+) > (?P<limit>\d+))?", "packet_size"),
+    (r"^rate exceeds agent limit" + _OVER, "rate"),
+    (r"^duration exceeds agent limit" + _OVER, "duration"),
+    (r"^threads exceed agent limit" + _OVER, "threads"),
+    (r"^packet_size exceeds agent limit" + _OVER, "packet_size"),
+    # "asked" is the field: rate, duration, threads or packet_size
+    (r"^(?P<asked>rate|duration|threads|packet_size) must be positive", "not_positive"),
+    (r"^command time is (?P<asked>\d+) s off the agent's clock", "clock"),
     (r"^protocol is not allowed: (?P<asked>\S+)", "protocol"),
     (r"^target is not in the agent allow-list: (?P<asked>\S+)", "target"),
     (r"^an authorized job is already running", "busy"),

@@ -30,6 +30,8 @@ The generation dialog offers two control transports:
 - **Direct Hub** keeps the existing HTTPS Hub workflow. Use an existing Hub, or generate an all-in-one Hub + Agent package and expose TCP 8787.
 - **Public MQTT relay** connects the desktop controller and server Agent through `broker.hivemq.com`. The server needs outbound internet access only; no inbound control port is opened. The generated relay URL and controller token are saved back to the Server Nodes page so additional nodes can join the same private relay channel.
 
+  Each relayed command carries the desktop's time, and the Agent refuses a command more than 5 minutes off its own clock, since it could be a replay. It says so, for example `command rejected: command time is 612 s off the agent's clock`, and the Server Agents page shows the reason next to the server. Keep the clocks of both computers set automatically (NTP). The server list's tooltip warns when a server's clock is a minute or more off this computer's, and a server whose clock is off is no longer shown as offline.
+
 If you have not yet deployed a Hub, leave the "Hub address" and "control token" fields blank, then click "Generate Server Node":
 
 1. Enter a node name.
@@ -122,6 +124,10 @@ Copy `agent/agent.example.json` to `agent.json` on the server:
 
 `allowed_targets` must be exact hostnames/IPs. Tasks with targets not in this list will be rejected by the Agent. Remote tasks are also subject to all caps set in the Agent configuration.
 
+`poll_interval`, `heartbeat_interval`, `job_heartbeat_interval` and `request_timeout` are in seconds, more than 0 and at most 3600; the Agent stops at start with a clear message when one is not, for example `"8s"`.
+
+The Agent keeps the number of the last Hub command it took in `agent.json.state.json`, next to `agent.json`, so a restarted Agent does not run old commands again. The Hub numbers commands from 1 every time it starts; the Agent notices the restart, takes the new commands from the start and registers again. If the state file cannot be written (a read-only folder or a full disk), the Agent says so and keeps running commands.
+
 Test‑run on the server:
 
 ```powershell
@@ -132,7 +138,7 @@ Seeing `online as server-01` means the Agent is online. The server only needs ou
 
 ### Limits
 
-`max_rate` (requests per second), `max_duration` (seconds per job), `max_threads` and `max_packet_size` (bytes) are the most a job may ask for, and `allowed_protocols` the protocols it may use. The Agent refuses anything above them and says by how much, for example `command rejected: rate exceeds agent limit: 500 > 100`. When it starts, it stops with a clear message if one of the limits is not a positive number.
+`max_rate` (requests per second), `max_duration` (seconds per job), `max_threads` and `max_packet_size` (bytes) are the most a job may ask for, and `allowed_protocols` the protocols it may use. The Agent refuses anything above them and says by how much, for example `command rejected: rate exceeds agent limit: 500 > 100`. A job asking for 0 or less is refused as such, for example `duration must be positive`. When it starts, it stops with a clear message if one of the limits is not a positive number.
 
 The **Generate Server Node** dialog sets the rate, duration and thread limits (100 QPS, 300 s and 32 threads unless you change them); the bundle's `README.txt` repeats them. To change them later, edit `agent.json` on the server and restart the Agent.
 

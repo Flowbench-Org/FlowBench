@@ -1,4 +1,4 @@
-"""Standalone Japanese interface pack for FlowBench 1.2.10.
+"""Standalone Japanese interface pack for FlowBench.
 
 Import this file from the local plugin page. Enable only one language pack
 at a time. Disable the pack and restart to fully restore the host language.
@@ -147,6 +147,20 @@ _RESOURCES = [
     ('先にノードを選択してください', '请先选择节点', 'Select an agent first'),
     ('ノード {#0} 台を読み込みました', '已加载 {#0} 个节点', 'Loaded {#0} agent(s)'),
     ('ノード一覧を更新しました：{#0} 台。', '已刷新节点列表，共 {#0} 个节点。', 'Agent list refreshed: {#0} agent(s).'),
+    ('{#0} 件を選択中', '已选择 {#0} 个', '{#0} selected'),
+    (' · {#0}/{#1} 件を表示', ' · 显示 {#0}/{#1}', ' · showing {#0}/{#1}'),
+    ('サーバー {#0} 台を選択中…', '已选 {#0} 个服务器…', '{#0} servers selected…'),
+    ('ノード {#0} 台を選択中', '已选择 {#0} 个节点', '{#0} agent(s) selected'),
+    ('サーバーノード {#0} 台を選択しました。', '已选择 {#0} 个服务器节点。', 'Selected {#0} server agent(s).'),
+    ('ノード {#0} の{#1}に失敗しました：{#2}', '节点 {#0} {#1}失败：{#2}', 'Agent {#0} failed to {#1}: {#2}'),
+    ('{#0} 台のノードに{#1}コマンドを送信しました。失敗 {#2} 台。', '已向 {#0} 个节点发送{#1}命令，失败 {#2} 个。', 'Sent {#1} command to {#0} agent(s); {#2} failed.'),
+    ('成功 {#0} 台、失敗 {#1} 台。', '成功 {#0} 个，失败 {#1} 个。', '{#0} succeeded, {#1} failed.'),
+    ('{#0}コマンドを実行できたノードはありません。', '没有节点成功执行{#0}命令。', 'No agent accepted the {#0} command.'),
+    ('{#0} 台のノードに{#1}コマンドを送信しました。', '已向 {#0} 个节点发送{#1}命令。', 'Sent the {#1} command to {#0} agent(s).'),
+    ('シングルインスタンスサーバーを起動できませんでした：{#0}', '单实例服务器启动失败: {#0}', 'Single-instance server failed to start: {#0}'),
+    ('FlowBench を起動しました。', 'FlowBench 启动。', 'FlowBench started.'),
+    ('免責事項に同意しました。', '用户已同意免责声明。', 'Disclaimer accepted.'),
+    ('免責事項に同意されなかったため終了します。', '用户未同意免责声明，程序退出。', 'Disclaimer not accepted; exiting.'),
     ('ログなし', '暂无日志', 'No log'),
     ('コピーできるログがありません', '当前没有可复制的日志', 'There is no log to copy'),
     ('対象 {#0} が認可されていないため、サーバーテストをブロックしました', '目标 {#0} 未授权，服务器任务已阻止', 'Target {#0} is not authorized; server job blocked'),
@@ -791,6 +805,13 @@ _RESOURCES = [
     ('ノードはこのプロトコルに対応していません', '节点不支持这个协议', 'the agent does not support this protocol'),
     ('対象がノードの許可リストにありません', '目标不在节点的授权列表里', "the target is not on the agent's allow-list"),
     ('ノードではすでにタスクが実行中です', '节点上已经有任务在运行', 'a job is already running on the agent'),
+    ('コマンドの時刻がノードの時計と {#0} 秒ずれているため拒否されました。サーバーとこのパソコンの時刻を確認してください', '命令时间和节点的时钟相差 {#0} 秒，节点拒绝了它；请检查服务器和本机的系统时间', "the command's time is {#0} s off the agent's clock, so it was refused; check the time on the server and on this computer"),
+    ('サーバーの時計はこのパソコンより約 {#0} 分進んでいます。5 分を超えてずれると、ノードは送られたコマンドを拒否します。', '服务器时钟比本机快约 {#0} 分钟；相差超过 5 分钟时，节点会拒绝发来的命令。', "The server's clock is about {#0} min ahead of this computer's; beyond 5 minutes the agent refuses commands."),
+    ('サーバーの時計はこのパソコンより約 {#0} 分遅れています。5 分を超えてずれると、ノードは送られたコマンドを拒否します。', '服务器时钟比本机慢约 {#0} 分钟；相差超过 5 分钟时，节点会拒绝发来的命令。', "The server's clock is about {#0} min behind this computer's; beyond 5 minutes the agent refuses commands."),
+    ('レートは 0 より大きくする必要があります', '速率必须大于 0', 'the rate must be more than 0'),
+    ('時間は 0 より大きくする必要があります', '时长必须大于 0', 'the duration must be more than 0'),
+    ('スレッド数は 0 より大きくする必要があります', '线程数必须大于 0', 'the thread count must be more than 0'),
+    ('パケットサイズは 0 より大きくする必要があります', '数据包大小必须大于 0', 'the packet size must be more than 0'),
     ('上限内で実行', '按上限运行', 'Run within limits'),
     ('、', '、', ', '),
     ('選択したノードはどれもこのタスクを実行できません：', '所选节点都不能运行这个任务：', 'None of the selected agents can run this job: '),
@@ -806,6 +827,7 @@ _RESOURCES = [
     ('スレッド {#0}（上限 {#1}）', '线程 {#0}（上限 {#1}）', 'threads {#0} (limit {#1})'),
     ('パケット {#0} バイト（上限 {#1}）', '数据包 {#0} 字节（上限 {#1}）', 'packet size {#0} bytes (limit {#1})'),
     ('• {#0}：{#1}（スキップします）', '• {#0}：{#1}，将跳过', '• {#0}: {#1}; it will be skipped'),
+    ('…ほか {#0} 台。すべてログに記録しました', '……还有 {#0} 台，完整列表见日志', '…and {#0} more; the log lists them all'),
     ('ノード {#0} は上限内で実行します：{#1} QPS、{#2} 秒、{#3} スレッド', '节点 {#0} 按上限运行：{#1} QPS、{#2} 秒、{#3} 线程', 'Agent {#0} runs within its limits: {#1} QPS, {#2} s, {#3} threads'),
     ('サーバーノード {#0} がタスクを拒否しました：{#1}', '服务器节点 {#0} 拒绝了任务：{#1}', 'Server node {#0} refused the job: {#1}'),
     ('ノードの上限：毎秒最大 {#0} リクエスト、1 タスク最長 {#1} 秒、最大 {#2} スレッド。変更するには、サーバーの agent.json で max_rate、max_duration、max_threads を編集してからノードを再起動してください。', '节点上限：每秒最多 {#0} 次请求，单个任务最长 {#1} 秒，最多 {#2} 个线程。要调整，就改服务器上 agent.json 里的 max_rate、max_duration、max_threads，然后重启节点。', 'Agent limits: at most {#0} requests per second, {#1} s per job and {#2} threads. To change them, edit max_rate, max_duration and max_threads in agent.json on the server, then restart the agent.'),
@@ -1086,11 +1108,11 @@ def uninstall():
 class Plugin(FlowBenchPlugin):
     name = ("日语语言包", "Japanese Language Pack")
     title = "日本語言語パック"
-    version = "1.0.10"
+    version = "1.0.11"
     author = "FlowBench"
     description = (
-        "将 FlowBench 1.2.10 的界面、对话框和动态提示转换为日语，兼容深浅色主题；启用即生效。",
-        "Japanese UI, dialogs and dynamic messages for FlowBench 1.2.10; supports light and dark themes."
+        "将 FlowBench 的界面、对话框和动态提示转换为日语，兼容深浅色主题；启用即生效。",
+        "Japanese UI, dialogs and dynamic messages for FlowBench; supports light and dark themes."
     )
     icon = "LANGUAGE"
     category = "ui"

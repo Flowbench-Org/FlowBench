@@ -339,6 +339,31 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(samples[-1]["memory_percent"], 75.0)
         self.assertEqual(samples[-1]["process_count"], 99)
 
+    def test_a_server_whose_clock_is_off_shows_online_with_a_warning(self):
+        secret = "controller-token-1234567890"
+        controller = RelayControllerClient("mqtt://broker.example.com:8000/" + "r" * 20, secret)
+        client = controller._build_client()
+        with patch.object(server_agent.time, "time", return_value=time.time() - 600):
+            message = server_agent.relay_status_message(secret, "a1", "东京-1", {}, True, {"state": "idle"})
+        # Kept by the broker from some time ago: judged by its own time.
+        client.on_message(client, None, types.SimpleNamespace(
+            payload=json.dumps(message).encode(), retain=True))
+        with patch.object(controller, "_ensure_connected"):
+            self.assertFalse(controller.list_agents()[0]["online"])
+            # Sent just now by a server whose clock is ten minutes slow.
+            client.on_message(client, None, types.SimpleNamespace(
+                payload=json.dumps(message).encode(), retain=False))
+            agent = controller.list_agents()[0]
+        self.assertTrue(agent["online"])
+        self.assertAlmostEqual(agent["clock_skew"], -600, delta=5)
+        # A status without a time says nothing about the clock.
+        bare = server_agent.sign_message(secret, {"type": "status", "agent_id": "a2", "name": "x",
+                                                  "metadata": {}, "online": True, "last_event": {}})
+        client.on_message(client, None, types.SimpleNamespace(payload=json.dumps(bare).encode(), retain=False))
+        with patch.object(controller, "_ensure_connected"):
+            agent = controller.list_agents()[1]
+        self.assertEqual((agent["agent_id"], agent["online"], agent["clock_skew"]), ("a2", True, None))
+
     def test_through_the_relay(self):
         secret = "controller-token-1234567890"
         message = server_agent.relay_status_message(
@@ -461,6 +486,17 @@ class NodeBundleTests(unittest.TestCase):
         out = folder / "hub.zip"
         view._provision_and_package(client, "node", out)
         self.check_bundle(out, "linux/")
+
+    def test_hub_bundle_made_on_a_worker_thread_uses_the_address_it_was_given(self):
+        view, folder = self.make_view()
+        view.hubEdit.setText("https://typed-meanwhile.example.com")
+        client = types.SimpleNamespace(provision_agent=lambda name: {
+            "agent_id": "server-1", "token": "agent-token-1234567890"})
+        out = folder / "hub.zip"
+        with patch.object(type(view.hubEdit), "text", side_effect=AssertionError("read off the GUI thread")):
+            view._provision_and_package(client, "node", out, hub_url="https://hub.example.com/")
+        with zipfile.ZipFile(out) as bundle:
+            self.assertEqual(json.loads(bundle.read("linux/agent.json"))["hub_url"], "https://hub.example.com")
 
 
 if __name__ == "__main__":

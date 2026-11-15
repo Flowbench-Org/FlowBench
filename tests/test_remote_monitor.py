@@ -57,6 +57,18 @@ class RemoteMonitorTests(unittest.TestCase):
             "timestamp", "cpu_percent", "memory_percent", "memory_used_gb", "memory_total_gb",
             "download_kbs", "upload_kbs", "tcp_connections", "process_count"})
 
+    def test_a_server_clock_set_back_does_not_freeze_its_history(self):
+        monitor = RemoteMonitor()
+        monitor.ingest([agent(samples=[raw(t) for t in range(3600, 3615)])])
+        # NTP sets the clock back by an hour: every new sample looks older.
+        monitor.ingest([agent(samples=[raw(t) for t in range(15, 30)])])
+        monitor.ingest([agent(samples=[raw(t) for t in range(17, 32)])])
+        kbs = [s["download_kbs"] for s in monitor.samples("a1")]
+        self.assertEqual(kbs, [100.0 + t for t in range(3600, 3615)] + [100.0 + t for t in range(15, 32)])
+        # A heartbeat delivered a few seconds late is still just a repeat.
+        monitor.ingest([agent(samples=[raw(t) for t in range(10, 25)])])
+        self.assertEqual(len(monitor.samples("a1")), len(kbs))
+
     def test_bad_values_are_dropped_or_clamped(self):
         self.assertIsNone(normalize_sample({"ts": BASE}))
         self.assertIsNone(normalize_sample(raw(1, cpu="high")))

@@ -425,6 +425,7 @@ class PluginManager(QObject):
             mod = importlib.util.module_from_spec(spec)
             # 注入基类，插件文件无需 import 即可继承；sys.modules 注册支持包内相对导入
             mod.__dict__["FlowBenchPlugin"] = FlowBenchPlugin
+            mod.__dict__["NetPulsePlugin"] = FlowBenchPlugin     # plugins from before the rename
             mod.__dict__["PluginContext"] = PluginContext
             sys.modules[mod_name] = mod
             spec.loader.exec_module(mod)

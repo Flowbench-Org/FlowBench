@@ -16,6 +16,10 @@ from PySide6.QtCore import QObject, Signal
 
 MAX_POINTS = 900          # 15 minutes at one sample per second, like the local history
 MAX_BATCH = 120           # samples accepted from one heartbeat
+# A heartbeat repeats the last 15 seconds, and the relay may deliver one a
+# little late; a batch whose newest sample is this much older than the last
+# one taken means the server's clock was set back.
+CLOCK_STEP = 60.0
 
 
 def _number(value, low=0.0, high=None) -> float:
@@ -119,6 +123,11 @@ class RemoteMonitor(QObject):
                 if parsed is not None:
                     fresh.append(parsed)
             fresh.sort(key=lambda pair: pair[0])
+            if fresh and fresh[-1][0] < entry["last_ts"] - CLOCK_STEP:
+                # Every new sample looks older than the last one taken: the
+                # server's clock was set back.  Count from the new samples
+                # instead of dropping them until the clock catches up.
+                entry["last_ts"] = 0.0
             for ts, sample in fresh:
                 if ts > entry["last_ts"]:
                     entry["samples"].append(sample)

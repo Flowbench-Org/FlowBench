@@ -84,11 +84,13 @@ class AgentSideTests(unittest.TestCase):
         self.assertEqual(message["metadata"]["limits"]["max_threads"], 3)
 
     def test_bad_limits_stop_the_agent_at_start(self):
-        for value in (0, -5, "abc", True, None, "NaN"):
+        for value in (0, -5, "abc", True, None, "NaN", 10 ** 400):
             with self.subTest(value=value), self.assertRaisesRegex(ValueError, "max_rate must be a positive"):
                 self.config(max_rate=value)
         with self.assertRaisesRegex(ValueError, "max_threads must be a positive"):
             self.config(max_threads=0)
+        with self.assertRaisesRegex(ValueError, "max_duration must be a positive"):
+            self.config(max_duration=10 ** 400)
         self.assertEqual(self.config(max_duration="600")["max_duration"], 600)
 
     def test_refusals_say_by_how_much(self):
@@ -98,7 +100,13 @@ class AgentSideTests(unittest.TestCase):
                  (dict(duration=600), "duration exceeds agent limit: 600 > 300"),
                  (dict(threads=50), "threads exceed agent limit: 50 > 32"),
                  (dict(packet_size=70000), "packet_size exceeds agent limit: 70000 > 65536"),
-                 (dict(rate=0), "rate must be positive"))
+                 (dict(rate=0), "rate must be positive"),
+                 (dict(duration=0), "duration must be positive"),
+                 (dict(threads=-2), "threads must be positive"),
+                 (dict(packet_size=-5), "packet_size must be positive"),
+                 # Written out in full, never 1e+06, and not rounded to look equal.
+                 (dict(rate=1_000_000), "rate exceeds agent limit: 1000000 > 100"),
+                 (dict(rate=100.0000004), "rate exceeds agent limit: 100.0000004 > 100"))
         for values, message in cases:
             with self.subTest(values=values), self.assertRaises(ValueError) as caught:
                 server_agent.validate_job(dict({"target": "example.test", "protocol": "HTTP"}, **values),
@@ -111,9 +119,12 @@ class LimitLogicTests(unittest.TestCase):
         self.assertEqual(agent_limits.reported_limits(agent("a", rate=50))["max_rate"], 50.0)
         self.assertIsNone(agent_limits.reported_limits(agent("a", limits=False)))     # older agent
         self.assertIsNone(agent_limits.reported_limits({"metadata": None}))
-        for bad in (0, -1, "x", True, float("inf")):
+        for bad in (0, -1, "x", True, float("inf"), 10 ** 400):
             with self.subTest(bad=bad):
                 self.assertIsNone(agent_limits.reported_limits(agent("a", rate=bad)))
+        huge = agent("a")
+        huge["metadata"]["limits"]["max_threads"] = 10 ** 400
+        self.assertIsNone(agent_limits.reported_limits(huge))
 
     def test_problems_and_fit(self):
         limits = agent_limits.reported_limits(agent("a"))
@@ -136,6 +147,18 @@ class LimitLogicTests(unittest.TestCase):
         self.assertEqual(agent_limits.refusal("protocol is not allowed: UDP"), ("protocol", "UDP", None))
         self.assertEqual(agent_limits.refusal("an authorized job is already running"), ("busy", None, None))
         self.assertIsNone(agent_limits.refusal("connection reset"))
+        self.assertEqual(agent_limits.refusal("duration must be positive"), ("not_positive", "duration", None))
+        self.assertEqual(agent_limits.refusal("rate exceeds agent limit: 1e+06 > 100"),
+                         ("rate", "1e+06", "100"))               # as an unreleased agent wrote it
+        self.assertEqual(agent_limits.refusal("rate exceeds agent limit: 100.0000004 > 100"),
+                         ("rate", "100.0000004", "100"))
+
+    def test_numbers_in_messages(self):
+        from agent.transport import number_text
+        for value, text in ((500, "500"), (100.0, "100"), (1e6, "1000000"), (0.5, "0.5"),
+                            (100.0000004, "100.0000004"), (1e20, "100000000000000000000")):
+            with self.subTest(value=value):
+                self.assertEqual(number_text(value), text)
 
 
 class FakeClient:
@@ -193,6 +216,20 @@ class AgentPageTests(unittest.TestCase):
         self.assertEqual(sent["old"]["rate"], 500)                 # reports no limits: as it is
         self.assertTrue(any("small runs within its limits: 100 QPS, 300 s, 32 threads" in line
                             for line in self.view._log_lines))
+
+    def test_many_servers_over_their_limits_keep_the_dialog_short(self):
+        from app.ui.agent_view import FIT_LIST_MAX
+        names = [f"hk-{i:02d}" for i in range(40)]
+        sent = self.run_job([agent(name) for name in names], names)
+        title, text = self.asked[0]
+        listed = [line for line in text.splitlines() if line.startswith("• ")]
+        self.assertEqual(len(listed), FIT_LIST_MAX)
+        self.assertIn(f"…and {40 - FIT_LIST_MAX} more; the log lists them all", text)
+        for name in names:                         # each one is in the log
+            self.assertTrue(any(line.endswith(f"• {name}: rate 500 QPS (limit 100), duration 600 s "
+                                              "(limit 300), threads 50 (limit 32)")
+                                for line in self.view._log_lines), name)
+        self.assertEqual(len(sent), 40)
 
     def test_cancelling_sends_nothing(self):
         self.answer = False
@@ -258,9 +295,19 @@ class AgentPageTests(unittest.TestCase):
         self.assertEqual(agent_view.refusal_text("rate exceeds agent limit: 500 > 100"),
                          "速率超过节点上限（500 > 100）")
         self.assertEqual(agent_view.problem_text("threads", 50, 32), "线程 50（上限 32）")
+        self.assertEqual(agent_view.problem_text("rate", 1e6, 100.0), "速率 1000000 QPS（上限 100）")
+        self.assertEqual(agent_view.refusal_text("duration must be positive"), "时长必须大于 0")
+        self.assertEqual(agent_view.refusal_text("command time is 612 s off the agent's clock"),
+                         "命令时间和节点的时钟相差 612 秒，节点拒绝了它；请检查服务器和本机的系统时间")
+        self.assertEqual(agent_view.clock_text(-600), "服务器时钟比本机慢约 10 分钟；相差超过 5 分钟时，节点会拒绝发来的命令。")
         self.assertEqual(agent_view.limits_text(agent_limits.reported_limits(agent("a"))),
                          "上限 100 QPS · 300 秒 · 32 线程")
         settings._data["language"] = "en-US"
+        self.assertEqual(agent_view.refusal_text("threads must be positive"),
+                         "the thread count must be more than 0")
+        self.assertIn("about 3 min ahead", agent_view.clock_text(170))
+        for quiet in (None, "x", 30, -59, float("nan"), float("inf")):
+            self.assertEqual(agent_view.clock_text(quiet), "")
         for text in (agent_view.refusal_text("protocol is not allowed: UDP"),
                      agent_view.problem_text("rate", 500, 100.0),
                      agent_view.limits_text(agent_limits.reported_limits(agent("a")))):

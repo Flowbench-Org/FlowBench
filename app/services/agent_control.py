@@ -151,15 +151,29 @@ class RelayControllerClient:
             agent_id = str(payload.get("agent_id") or "").strip()
             if not agent_id or payload.get("type") != "status":
                 return
-            last_seen = float(payload.get("last_seen") or 0)
+            try:
+                reported = float(payload.get("last_seen") or 0)
+            except (TypeError, ValueError):
+                return
+            now = time.time()
+            with self._status_lock:
+                skew = (self._agents.get(agent_id) or {}).get("clock_skew")
+            if getattr(message, "retain", False):
+                last_seen = reported        # kept by the broker: sent some time ago
+            else:
+                # Sent just now: judge it by this computer's clock, so a server
+                # whose clock is off is not shown offline, and note how far
+                # off it is (relayed commands are refused past 5 minutes).
+                last_seen, skew = now, (reported - now if reported > 0 else None)
             item = {
                 "agent_id": agent_id,
                 "name": str(payload.get("name") or agent_id),
                 "metadata": dict(payload.get("metadata") or {}),
-                "online": bool(payload.get("online") and time.time() - last_seen < 30),
+                "online": bool(payload.get("online") and now - last_seen < 30),
                 "last_seen": last_seen,
                 "last_event": dict(payload.get("last_event") or {}),
                 "queued_commands": 0,
+                "clock_skew": skew,
             }
             with self._status_lock:
                 self._agents[agent_id] = item

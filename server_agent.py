@@ -24,7 +24,7 @@ import ssl
 from agent.relay import (parse_relay_url, relay_topic, sign_message,
                          verify_message)
 from agent.sysmetrics import SystemSampler
-from agent.transport import compact_json, decode_json, endpoint
+from agent.transport import compact_json, decode_json, endpoint, number_text
 from agent.worker import HeadlessStressJob
 
 DEFAULTS = {
@@ -40,6 +40,8 @@ SUPPORTED_PROTOCOLS = {"HTTP", "HTTPS", "TCP"}
 # The most a job may ask for; the desktop reads them from the agent's
 # metadata and checks a job before sending it.
 LIMIT_TYPES = {"max_rate": float, "max_duration": int, "max_threads": int, "max_packet_size": int}
+# Seconds; metrics_interval has its own range.
+INTERVALS = ("poll_interval", "heartbeat_interval", "job_heartbeat_interval", "request_timeout")
 
 
 class AgentHTTPError(RuntimeError):
@@ -167,11 +169,25 @@ def load_config(path: Path):
             if isinstance(value, bool):
                 raise TypeError
             number = kind(value)
+            usable = math.isfinite(number) and number > 0   # a huge int overflows here
         except (TypeError, ValueError, OverflowError) as exc:
             raise ValueError(f"{key} must be a positive number") from exc
-        if not (math.isfinite(number) and number > 0):
+        if not usable:
             raise ValueError(f"{key} must be a positive number")
         merged[key] = number
+    # Checked here so a typo such as "8s" stops the agent at start with this
+    # message, instead of a traceback or "control-plane retry" over and over.
+    for key in INTERVALS:
+        value = merged.get(key)
+        try:
+            if isinstance(value, bool):
+                raise TypeError
+            seconds = float(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{key} must be a number of seconds") from exc
+        if not (math.isfinite(seconds) and 0 < seconds <= 3600):
+            raise ValueError(f"{key} must be more than 0 and at most 3600 seconds")
+        merged[key] = seconds
     merged["metrics"] = merged.get("metrics", True) is not False
     try:
         metrics_interval = float(merged.get("metrics_interval", DEFAULTS["metrics_interval"]))
@@ -253,14 +269,17 @@ def validate_job(raw: dict, config: dict):
         raise ValueError("numeric job fields are invalid") from exc
     if not math.isfinite(rate): raise ValueError("rate must be finite")
     # The messages start the same as before, so older desktops still read them.
-    if rate <= 0: raise ValueError("rate must be positive")
+    for name, value in (("rate", rate), ("duration", duration), ("threads", threads),
+                        ("packet_size", packet_size)):
+        if value <= 0:
+            raise ValueError(f"{name} must be positive")
     if rate > float(config["max_rate"]):
-        raise ValueError(f"rate exceeds agent limit: {rate:g} > {float(config['max_rate']):g}")
-    if not (0 < duration <= int(config["max_duration"])):
+        raise ValueError(f"rate exceeds agent limit: {number_text(rate)} > {number_text(config['max_rate'])}")
+    if duration > int(config["max_duration"]):
         raise ValueError(f"duration exceeds agent limit: {duration} > {int(config['max_duration'])}")
-    if not (0 < threads <= int(config["max_threads"])):
+    if threads > int(config["max_threads"]):
         raise ValueError(f"threads exceed agent limit: {threads} > {int(config['max_threads'])}")
-    if not (0 < packet_size <= int(config["max_packet_size"])):
+    if packet_size > int(config["max_packet_size"]):
         raise ValueError(f"packet_size exceeds agent limit: {packet_size} > {int(config['max_packet_size'])}")
     if not (1 <= port <= 65535): raise ValueError("port must be between 1 and 65535")
     if not (100 <= timeout <= 60000): raise ValueError("timeout must be between 100 and 60000 ms")
@@ -362,6 +381,47 @@ def metadata(config=None):
     return data
 
 
+# How far a relayed command's time may be from the agent's clock.  Older
+# commands could be replays, so they are refused.
+COMMAND_MAX_AGE = 300
+
+
+def relay_command(secret, agent_id, payload, now=None):
+    """What a relayed message asks of this agent: None to ignore it, else
+    (command_id, command, off_by).  ``off_by`` is how many seconds the
+    command's time is from this agent's clock when that is more than
+    COMMAND_MAX_AGE (the command is then refused), else None."""
+    if not verify_message(secret, payload):
+        return None
+    if payload.get("type") != "command" or str(payload.get("agent_id") or "") != agent_id:
+        return None
+    try:
+        created_at = float(payload.get("created_at") or 0)
+    except (TypeError, ValueError):
+        return None
+    command_id = str(payload.get("id") or "")
+    if not command_id or not (math.isfinite(created_at) and created_at > 0):
+        return None
+    skew = (time.time() if now is None else now) - created_at
+    return command_id, dict(payload.get("command") or {}), (skew if abs(skew) > COMMAND_MAX_AGE else None)
+
+
+def run_relay_command(runtime, command, off_by=None):
+    """Run a relayed command, or refuse one whose time is off (see
+    relay_command) where the desktop can see why: a clock that is wrong on
+    one side drops every command, which used to happen without a word."""
+    if off_by is not None:
+        message = f"command time is {int(round(abs(off_by)))} s off the agent's clock"
+        runtime._set_event({"state": "error", "error": message, "ts": time.time()})
+        print(f"[agent] command rejected: {message}", flush=True)
+        return
+    try:
+        runtime.handle(command)
+    except Exception as exc:
+        runtime._set_event({"state": "error", "error": str(exc), "ts": time.time()})
+        print(f"[agent] command rejected: {exc}", flush=True)
+
+
 def run_relay_agent(config, config_path):
     """Run an Agent over the authenticated public MQTT relay."""
     try:
@@ -431,20 +491,9 @@ def run_relay_agent(config, config_path):
             payload = json.loads(message.payload.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             return
-        if not verify_message(secret, payload):
-            return
-        if payload.get("type") != "command" or str(payload.get("agent_id") or "") != agent_id:
-            return
-        try:
-            created_at = float(payload.get("created_at") or 0)
-        except (TypeError, ValueError):
-            return
-        if abs(time.time() - created_at) > 300:
-            return
-        command_id = str(payload.get("id") or "")
-        if not command_id or command_id in processed_ids:
-            return
-        command_queue.put(payload)
+        found = relay_command(secret, agent_id, payload)
+        if found is not None and found[0] not in processed_ids:
+            command_queue.put(found)
 
     client.on_connect = on_connect
     client.on_disconnect = on_disconnect
@@ -456,17 +505,13 @@ def run_relay_agent(config, config_path):
     try:
         while True:
             try:
-                payload = command_queue.get(timeout=0.25)
+                found = command_queue.get(timeout=0.25)
             except queue.Empty:
-                payload = None
-            if payload is not None:
-                command_id = str(payload["id"])
+                found = None
+            if found is not None:
+                command_id, command, off_by = found
                 if command_id not in processed_ids:
-                    try:
-                        runtime.handle(dict(payload.get("command") or {}))
-                    except Exception as exc:
-                        runtime._set_event({"state": "error", "error": str(exc), "ts": time.time()})
-                        print(f"[agent] command rejected: {exc}", flush=True)
+                    run_relay_command(runtime, command, off_by)
                     processed_ids.add(command_id)
                     processed_order.append(command_id)
                     if len(processed_order) > 100:
@@ -492,47 +537,113 @@ def run_relay_agent(config, config_path):
         client.loop_stop()
 
 
+class CommandCursor:
+    """The last hub command this agent took, kept in a small state file so a
+    restarted agent does not run old commands again.
+
+    The hub numbers commands from 1 every time it starts and sends an epoch
+    that changes with each start; on a new epoch the cursor starts from 0.
+    """
+
+    def __init__(self, path):
+        self.path = Path(path)
+        self.cursor = 0
+        self.epoch = ""
+        try:
+            state = json.loads(self.path.read_text(encoding="utf-8"))
+            self.cursor = max(0, int(state.get("cursor", 0)))
+            self.epoch = str(state.get("epoch") or "")
+        except (OSError, ValueError, TypeError, AttributeError, json.JSONDecodeError):
+            pass
+
+    def save(self):
+        """Write the state file.  Failing to write it (a read-only folder, a
+        full disk) must not cost the command: it is logged and the agent
+        goes on."""
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            temp = self.path.with_suffix(self.path.suffix + ".tmp")
+            temp.write_text(json.dumps({"cursor": self.cursor, "epoch": self.epoch}), encoding="utf-8")
+            os.replace(temp, self.path)
+            return True
+        except OSError as exc:
+            print(f"[agent] cannot save {self.path}: {exc}", flush=True)
+            return False
+
+    def hub_restarted(self, epoch) -> bool:
+        """Note the hub's epoch; True when the hub restarted since the cursor
+        was taken (then the cursor starts again from 0)."""
+        epoch = str(epoch or "")
+        if not epoch or epoch == self.epoch:
+            return False
+        restarted = bool(self.epoch)
+        self.epoch = epoch
+        if restarted:
+            self.cursor = 0
+        self.save()
+        return restarted
+
+    def advance(self, seq) -> bool:
+        """Take command ``seq``; False when it was taken already."""
+        if seq <= self.cursor:
+            return False
+        self.cursor = seq
+        self.save()
+        return True
+
+
+class HubLoop:
+    """The agent's side of the HTTP hub: register, send heartbeats, take commands."""
+
+    def __init__(self, config, hub, runtime, cursor, sampler=None):
+        self.config = config
+        self.hub = hub
+        self.runtime = runtime
+        self.cursor = cursor
+        self.sampler = sampler
+        self.registered = False
+        self.last_heartbeat = 0.0
+
+    def step(self):
+        try:
+            now = time.monotonic()
+            if not self.registered:
+                self.hub.register(metadata(self.config))
+                self.registered = True
+                print(f"[agent] online as {self.config['agent_id']} (hub={self.config['hub_url']})", flush=True)
+            event = self.runtime.current_event()
+            if now - self.last_heartbeat >= heartbeat_interval(self.config, event, self.sampler is not None):
+                self.hub.heartbeat(with_system({"cursor": self.cursor.cursor, **event}, self.sampler))
+                self.last_heartbeat = now
+            item = self.hub.poll(self.cursor.cursor)
+            if self.cursor.hub_restarted(item.get("epoch")):
+                # What the hub knew about this agent (its limits, its state)
+                # is gone too: register again and report at once, then take
+                # the hub's commands from the start.
+                self.registered = False
+                self.last_heartbeat = 0.0
+                print("[agent] hub restarted; taking its commands from the start", flush=True)
+                return
+            seq = int(item.get("seq", self.cursor.cursor))
+            if self.cursor.advance(seq) and item.get("command"):
+                try:
+                    self.runtime.handle(item["command"])
+                except Exception as exc:
+                    self.runtime._set_event({"state": "error", "error": str(exc), "ts": time.time()})
+                    print(f"[agent] command rejected: {exc}", flush=True)
+        except Exception as exc:
+            self.registered = False
+            print(f"[agent] control-plane retry: {exc}", flush=True)
+
+
 def run_agent(config, config_path):
     if config.get("transport") == "mqtt_relay":
         return run_relay_agent(config, config_path)
     state_path = Path(config.get("state_file") or (str(config_path) + ".state.json")).expanduser().resolve()
-    try:
-        state = json.loads(state_path.read_text(encoding="utf-8"))
-        cursor = max(0, int(state.get("cursor", 0)))
-    except (OSError, ValueError, TypeError, json.JSONDecodeError):
-        cursor = 0
-    hub = HubClient(config, config_path)
-    runtime = AgentRuntime(config)
-    sampler = start_sampler(config)
-    registered = False
-    last_heartbeat = 0.0
+    loop = HubLoop(config, HubClient(config, config_path), AgentRuntime(config),
+                   CommandCursor(state_path), start_sampler(config))
     while True:
-        try:
-            now = time.monotonic()
-            if not registered:
-                hub.register(metadata(config)); registered = True
-                print(f"[agent] online as {config['agent_id']} (hub={config['hub_url']})", flush=True)
-            event = runtime.current_event()
-            if now - last_heartbeat >= heartbeat_interval(config, event, sampler is not None):
-                hub.heartbeat(with_system({"cursor": cursor, **event}, sampler))
-                last_heartbeat = now
-            item = hub.poll(cursor)
-            seq = int(item.get("seq", cursor))
-            if seq > cursor:
-                cursor = seq
-                state_path.parent.mkdir(parents=True, exist_ok=True)
-                temp = state_path.with_suffix(state_path.suffix + ".tmp")
-                temp.write_text(json.dumps({"cursor": cursor}), encoding="utf-8")
-                os.replace(temp, state_path)
-                if item.get("command"):
-                    try:
-                        runtime.handle(item["command"])
-                    except Exception as exc:
-                        runtime._set_event({"state": "error", "error": str(exc), "ts": time.time()})
-                        print(f"[agent] command rejected: {exc}")
-        except Exception as exc:
-            registered = False
-            print(f"[agent] control-plane retry: {exc}", flush=True)
+        loop.step()
         time.sleep(max(0.5, float(config["poll_interval"])))
 
 

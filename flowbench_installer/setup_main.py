@@ -12,7 +12,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from flowbench_installer import core
+from flowbench_installer import core, winplat
 
 DEFAULT_ACCENT = "#0078D4"      # FlowBench's default theme colour
 
@@ -57,19 +57,25 @@ def main(argv=None) -> int:
     accent = QColor(args.accent or prefs["accent"] or "")
     setThemeColor(accent if accent.isValid() else QColor(DEFAULT_ACCENT))
 
+    lang = args.lang or prefs["lang"]
+    chinese = None if lang is None else lang == "zh"
     try:
         info = core.read_payload_info(payload_dir / core.PAYLOAD_INFO_NAME)
         if not (payload_dir / core.PAYLOAD_NAME).is_file():
             raise core.InstallError("The installer is missing its payload.",
                                     "安装程序缺少安装数据。")
     except (OSError, ValueError, core.InstallError) as exc:
-        QMessageBox.critical(None, "FlowBench Setup", str(exc))
+        zh = winplat.system_prefers_chinese() if chinese is None else chinese
+        if isinstance(exc, core.InstallError):
+            text = exc.text(zh)
+        else:
+            text = (f"安装程序的数据缺失或已损坏，请重新下载安装程序。\n\n{exc}" if zh else
+                    f"The installer's data is missing or damaged. Download the installer again.\n\n{exc}")
+        QMessageBox.critical(None, "FlowBench 安装程序" if zh else "FlowBench Setup", text)
         return 1
 
     from flowbench_installer.gui import SetupWindow
 
-    lang = args.lang or prefs["lang"]
-    chinese = None if lang is None else lang == "zh"
     window = SetupWindow(payload_dir / core.PAYLOAD_NAME, info,
                          update=args.update,
                          target=Path(args.dir) if args.dir else None,

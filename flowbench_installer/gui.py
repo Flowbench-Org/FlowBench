@@ -406,6 +406,13 @@ class InstallerWindow(FramelessWindow):
         box.cancelButton.setText(self.t("取消", "Cancel"))
         return bool(box.exec())
 
+    def ask_yes_no(self, title: str, text: str, yes: str) -> bool:
+        """Modal prompt with ``yes`` and Cancel (tests replace this)."""
+        box = MessageBox(title, text, self)
+        box.yesButton.setText(yes)
+        box.cancelButton.setText(self.t("取消", "Cancel"))
+        return bool(box.exec())
+
     def _warn(self, title, text):
         box = MessageBox(title, text, self)
         box.cancelButton.hide()
@@ -441,6 +448,7 @@ class SetupWindow(InstallerWindow):
         self._retry_stage = True
         self._legacy = None
         self.space_low = False
+        self._space = (0, None)
         self.phase = "updating" if update else "welcome"
         self._progress = (0, "")
         self._error = None
@@ -537,7 +545,13 @@ class SetupWindow(InstallerWindow):
         self.pathEdit = LineEdit(card)
         self.pathEdit.setText(str(self.target))
         self.pathEdit.setClearButtonEnabled(False)
-        self.pathEdit.textChanged.connect(self._refresh_location)
+        # Looking at a folder can take seconds on a network drive, so the
+        # checks wait until typing pauses instead of running on every key.
+        self._locationTimer = QTimer(self)
+        self._locationTimer.setSingleShot(True)
+        self._locationTimer.setInterval(350)
+        self._locationTimer.timeout.connect(self._refresh_location)
+        self.pathEdit.textChanged.connect(self._on_path_edited)
         self.browseButton = PushButton(card)
         self.bilingual(self.browseButton, "更改…", "Browse…")
         self.browseButton.clicked.connect(self._browse)
@@ -617,7 +631,12 @@ class SetupWindow(InstallerWindow):
         self.bilingual(self.retryButton, "重试", "Retry")
         self.retryButton.clicked.connect(self._retry)
         self.retryButton.hide()
-        self._button_row(layout, self.stopButton, self.retryButton)
+        self.changeButton = TransparentPushButton(FluentIcon.LEFT_ARROW, "", page)
+        self.bilingual(self.changeButton, "更改安装位置", "Choose another folder")
+        self.changeButton.clicked.connect(self._change_location)
+        self.changeButton.hide()
+        self._button_row(layout, self.stopButton, self.retryButton, leading=self.changeButton)
+        self.changeButton.setMinimumWidth(0)
         return page
 
     def _build_done_page(self):
@@ -690,9 +709,15 @@ class SetupWindow(InstallerWindow):
             if path.name.lower() != core.APP_NAME.lower():
                 path = path / core.APP_NAME
             self.pathEdit.setText(str(path))
+            self._refresh_location()
 
     def _use_default_target(self):
         self.pathEdit.setText(str(self.default_target))
+        self._refresh_location()
+
+    def _on_path_edited(self, _text=None):
+        self.defaultButton.setVisible(not same_path(self.chosen_target(), self.default_target))
+        self._locationTimer.start()
 
     def _legacy_installs(self):
         if self._legacy is None:
@@ -703,6 +728,7 @@ class SetupWindow(InstallerWindow):
     def _refresh_location(self):
         if self.update_mode:
             return
+        self._locationTimer.stop()
         target = self.chosen_target()
         existing = core.read_marker(target) if target.is_dir() else {}
         installed = existing.get("version") or ""
@@ -753,16 +779,31 @@ class SetupWindow(InstallerWindow):
         self.spaceLabel.setText(text)
         self.spaceLabel.setTextColor(*(ERROR if low else SECONDARY))
         self.space_low = low
+        self._space = (need, free)
 
     # -- wizard flow ---------------------------------------------------------
 
     def start_install(self):
+        self._locationTimer.stop()
         target = self.chosen_target()
         try:
             core.check_target(target)
         except core.InstallError as exc:
             self._warn(self.t("无法安装到这里", "Cannot install here"), self._error_text(exc))
             return
+        self._refresh_space(target)
+        if self.space_low:
+            need, free = self._space
+            if not self.ask_yes_no(
+                    self.t("磁盘空间可能不够", "The drive may be too full"),
+                    self.t(f"安装需要约 {size_text(need)}，这个磁盘只剩 {size_text(free)}。"
+                           "空间不够的话，安装会中途失败。\n"
+                           "可以先清理出一些空间，或者换一个位置。仍然要安装吗？",
+                           f"Setup needs about {size_text(need)} and this drive has "
+                           f"{size_text(free)} free. Without enough space, setup stops partway.\n"
+                           "You can free some space or choose another folder. Install anyway?"),
+                    self.t("仍然安装", "Install anyway")):
+                return
         self.target = target
         self.session = SetupSession(self.payload, self.info, target,
                                     desktop_shortcut=self.desktopCheck.isChecked(),
@@ -851,7 +892,22 @@ class SetupWindow(InstallerWindow):
             self._set_elided(self.progressDetail, self._progress_text())
         self.progressError.setVisible(failed)
         self.retryButton.setVisible(failed)
+        # Nothing was put in place yet, so another folder can be chosen.
+        self.changeButton.setVisible(failed and self._retry_stage)
         self.percentLabel.setText("" if failed else f"{self._progress[0]}%")
+
+    def _change_location(self):
+        """Back to the location page after setup failed before anything was
+        put in place, e.g. no permission or no space in that folder."""
+        if self.busy:
+            return
+        if self.session:
+            self.session.discard()
+        self.progressBar.resume()
+        self.phase = "location"
+        self._refresh_location()
+        self.pages.setCurrentWidget(self.locationPage, back=True)
+        self.clock.boost(0.6)
 
     def _cancel_install(self):
         if self.worker and self.busy:

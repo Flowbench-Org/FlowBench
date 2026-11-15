@@ -1,3 +1,4 @@
+import errno
 import io
 import json
 import os
@@ -553,6 +554,33 @@ class UninstallWindowTests(unittest.TestCase):
         self.assertFalse(self.target.exists())
         win.close()
 
+    def test_cancelling_the_retry_of_a_locked_folder_offers_close_and_retry(self):
+        win = self.window()
+        asked = []
+
+        def ask_retry(title, text):
+            asked.append(title)
+            if len(asked) == 1:                   # "folder in use": Retry...
+                self.platform.running = [4321]    # ...but FlowBench is still running
+                return True
+            return False                          # "FlowBench is running": Cancel
+        win.ask_retry = ask_retry
+        with mock.patch.object(core, "uninstall_files",
+                               side_effect=core.AppInUseError("locked", "被占用")):
+            win.uninstallButton.click()
+            self.assertTrue(wait_for(lambda: len(asked) == 2, 10000))
+        self.assertEqual(asked, ["The install folder is in use", "FlowBench is running"])
+        self.assertIs(win.pages.currentWidget(), win.progressPage)
+        self.assertEqual(win.phase, "failed")
+        self.assertEqual(win.progressTitle.text(), "Uninstall did not finish")
+        self.assertTrue(win.closeButton.isVisible() and win.retryButton.isVisible())
+        self.assertTrue((self.target / "FlowBench.exe").exists())
+        self.platform.running = []
+        win.retryButton.click()                   # FlowBench has been closed now
+        self.assertTrue(wait_for(lambda: win.pages.currentWidget() is win.donePage, 10000))
+        self.assertFalse(self.target.exists())
+        win.close()
+
     def test_chinese_text(self):
         win = self.window(chinese=True)
         self.assertEqual(win.windowTitle(), "卸载 FlowBench")
@@ -597,6 +625,68 @@ class SetupWindowTests(unittest.TestCase):
         win.openButton.click()
         self.assertIn(("launch", str(self.target / "FlowBench.exe"), []), self.platform.calls)
         self.assertFalse(win.isVisible())
+
+    def test_failed_extraction_offers_another_folder(self):
+        win = self.wizard()
+        win.startButton.click()
+        with mock.patch.object(core, "extract_payload",
+                               side_effect=PermissionError(13, "Permission denied")):
+            win.installButton.click()
+            self.assertTrue(wait_for(lambda: win.retryButton.isVisible(), 10000))
+        self.assertIn("No permission to write", win.progressError.text())
+        self.assertTrue(win.changeButton.isVisible())
+        self.assertEqual(list((self.root / "Programs").iterdir()), [])     # nothing left behind
+        win.changeButton.click()
+        self.assertIs(win.pages.currentWidget(), win.locationPage)
+        other = self.root / "Other" / "FlowBench"
+        win.pathEdit.setText(str(other))
+        win.installButton.click()
+        self.assertTrue(wait_for(lambda: win.pages.currentWidget() is win.donePage, 10000))
+        self.assertTrue((other / "FlowBench.exe").exists())
+        self.assertFalse(self.target.exists())
+        win.close()
+
+    def test_a_full_disk_is_explained_in_the_interface_language(self):
+        win = SetupWindow(self.payload, self.info, target=self.target,
+                          chinese=True, platform=self.platform)
+        win.show()
+        win.startButton.click()
+        full = OSError(errno.ENOSPC, "No space left on device")
+        with mock.patch.object(core, "extract_payload", side_effect=full):
+            win.installButton.click()
+            self.assertTrue(wait_for(lambda: win.retryButton.isVisible(), 10000))
+        self.assertIn("磁盘空间不足", win.progressError.text())
+        self.assertNotIn("OSError", win.progressError.text())
+        self.assertTrue(win.changeButton.isVisible())
+        self.assertEqual(win.changeButton.text(), "更改安装位置")
+        win.set_language(False)
+        self.assertIn("not enough free space", win.progressError.text())
+        self.assertEqual(win.changeButton.text(), "Choose another folder")
+        win.close()
+
+    def test_other_extraction_errors_are_explained_too(self):
+        error = core.extract_error(self.root, OSError(errno.EIO, "Input/output error"))
+        self.assertIn("解压文件时出错", error.text(True))
+        self.assertIn("Could not extract the files", error.text(False))
+        self.assertIn("没有权限写入", core.extract_error(self.root, OSError(errno.EROFS, "ro")).text(True))
+
+    def test_short_space_asks_before_installing(self):
+        win = self.wizard()
+        win.startButton.click()
+        asked = []
+        win.ask_yes_no = lambda title, text, yes: asked.append((title, text, yes)) or False
+        with mock.patch.object(core, "free_space", return_value=1024 ** 2):
+            win.installButton.click()
+        self.assertEqual(len(asked), 1)
+        self.assertIn("1 MB free", asked[0][1])
+        self.assertEqual(asked[0][2], "Install anyway")
+        self.assertIs(win.pages.currentWidget(), win.locationPage)
+        self.assertFalse(self.target.exists())
+        win.ask_yes_no = lambda title, text, yes: True
+        with mock.patch.object(core, "free_space", return_value=1024 ** 2):
+            win.installButton.click()
+        self.assertTrue(wait_for(lambda: win.pages.currentWidget() is win.donePage, 10000))
+        win.close()
 
     def test_finish_closes_without_opening_flowbench(self):
         win = self.wizard()
@@ -757,6 +847,31 @@ class UpdaterTests(unittest.TestCase):
         self.assertTrue(args.update)
         self.assertEqual((args.pid, args.dir, args.lang, args.theme, args.accent),
                          (7, str(Path("/apps/FlowBench")), "zh", "dark", "#112233"))
+
+    def test_a_damaged_installer_says_so_in_the_chosen_language(self):
+        from PySide6.QtWidgets import QMessageBox
+        from flowbench_installer import setup_main
+        app()
+        payload = self.root / "payload"
+        payload.mkdir()
+        shown = []
+        no_prefs = {"lang": None, "theme": None, "accent": None}
+        with mock.patch.object(QMessageBox, "critical", side_effect=lambda *a: shown.append(a[1:])), \
+                mock.patch.object(core, "read_user_prefs", return_value=no_prefs), \
+                mock.patch("qfluentwidgets.setTheme"), mock.patch("qfluentwidgets.setThemeColor"):
+            self.assertEqual(setup_main.main(["--payload-dir", str(payload), "--lang", "zh"]), 1)
+            (payload / core.PAYLOAD_INFO_NAME).write_text(
+                json.dumps({"app": "FlowBench", "version": "9.9.9"}), encoding="utf-8")
+            self.assertEqual(setup_main.main(["--payload-dir", str(payload), "--lang", "zh"]), 1)
+            self.assertEqual(setup_main.main(["--payload-dir", str(payload), "--lang", "en"]), 1)
+            with mock.patch.object(winplat, "system_prefers_chinese", return_value=True):
+                self.assertEqual(setup_main.main(["--payload-dir", str(payload)]), 1)
+        (title, missing_info), (_, missing_archive), english, (_, system) = shown
+        self.assertEqual(title, "FlowBench 安装程序")
+        self.assertIn("安装程序的数据缺失或已损坏", missing_info)
+        self.assertEqual(missing_archive, "安装程序缺少安装数据。")
+        self.assertEqual(english, ("FlowBench Setup", "The installer is missing its payload."))
+        self.assertEqual(system, "安装程序缺少安装数据。")              # no language saved: the system's
 
     def test_cleanup_keeps_only_newer_complete_downloads(self):
         names = ["FlowBench-Setup-1.2.6.exe", "FlowBench-Setup-1.2.7.exe",

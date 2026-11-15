@@ -53,6 +53,19 @@ def settle(application):
         application.sendPostedEvents(None, QEvent.DeferredDelete)
 
 
+
+def f_string_shape(node):
+    """An f-string as a pattern over the pack's templates.  Each {...} may
+    stand for one or more of the pack's slots joined by punctuation (a value
+    such as "http://host" is two slots there), numbered in any order."""
+    parts = []
+    for part in node.values:
+        if isinstance(part, ast.Constant):
+            parts.append(re.escape(part.value))
+        else:
+            parts.append(r"(?:\{#\d+\}|\W)+?")
+    return re.compile("".join(parts))
+
 class JapanesePluginTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -92,8 +105,9 @@ class JapanesePluginTests(unittest.TestCase):
 
     def test_all_host_translation_calls_have_resources(self):
         known = {source for japanese, chinese, english in self.module._RESOURCES for source in (chinese, english)}
+        templates = [source for source in known if self.module._SLOT.search(source)]
         missing = []
-        for path in (ROOT / "app").rglob("*.py"):
+        for path in sorted((ROOT / "app").rglob("*.py")) + [ROOT / "main.py"]:
             tree = ast.parse(path.read_text(encoding="utf-8-sig"))
             for node in ast.walk(tree):
                 if not isinstance(node, ast.Call) or getattr(node.func, "id", "") != "L" or len(node.args) != 2:
@@ -102,6 +116,17 @@ class JapanesePluginTests(unittest.TestCase):
                     if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
                         if argument.value not in known:
                             missing.append(f"{path.name}:{node.lineno}: {argument.value}")
+                    elif isinstance(argument, ast.JoinedStr):
+                        words = "".join(part.value for part in argument.values if isinstance(part, ast.Constant))
+                        if all(isinstance(part, ast.Constant) for part in argument.values):
+                            covered = words in known        # an f-string without values
+                        elif not re.search(r"\w", words):
+                            continue                        # only values, shown as they are
+                        else:
+                            shape = f_string_shape(argument)
+                            covered = any(shape.fullmatch(source) for source in templates)
+                        if not covered:
+                            missing.append(f"{path.name}:{node.lineno}: f-string {words!r}")
         self.assertEqual(missing, [])
 
     def test_unknown_strings_urls_and_non_strings_are_unchanged(self):

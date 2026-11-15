@@ -2,6 +2,7 @@
 import copy
 import json
 import os
+import shutil
 import tempfile
 import threading
 import time
@@ -70,15 +71,8 @@ class AppSettings:
     def __init__(self):
         root = os.environ.get("APPDATA", os.path.expanduser("~"))
         base = os.path.join(root, "FlowBench")
-        old = os.path.join(root, "FlowBenchPy", "settings.json")
-        # 一次性迁移：旧版（FlowBenchPy）配置复制到新目录
-        if not os.path.exists(os.path.join(base, "settings.json")) and os.path.exists(old):
-            try:
-                with open(old, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                self._atomic_write_json(os.path.join(base, "settings.json"), data)
-            except Exception:
-                pass
+        if not os.path.exists(os.path.join(base, "settings.json")):
+            self._migrate_old_profile(root, base)
         try:
             os.makedirs(base, exist_ok=True)
         except OSError:
@@ -176,6 +170,32 @@ class AppSettings:
         if type(raw.get("_lang_migrated", True)) is not bool:
             clean["_lang_migrated"] = True
         return clean
+
+    # The folders FlowBench used under its earlier names, newest first.
+    OLD_PROFILES = ("NetPulse", "NetPulsePy")
+
+    @classmethod
+    def _migrate_old_profile(cls, root, base):
+        """一次性迁移：把旧名字（NetPulse，更早是 NetPulsePy）下的设置复制过来，
+        插件目录在新目录还没有插件时一并复制。旧目录保持不动。"""
+        for name in cls.OLD_PROFILES:
+            old = os.path.join(root, name)
+            try:
+                with open(os.path.join(old, "settings.json"), "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if not isinstance(data, dict):
+                    continue
+                cls._atomic_write_json(os.path.join(base, "settings.json"), data)
+            except Exception:
+                continue
+            plugins, target = os.path.join(old, "plugins"), os.path.join(base, "plugins")
+            try:
+                if os.path.isdir(plugins) and not (os.path.isdir(target) and os.listdir(target)):
+                    shutil.copytree(plugins, target, dirs_exist_ok=True)
+            except Exception:
+                pass
+            return name
+        return None
 
     @staticmethod
     def _atomic_write_json(path, data):

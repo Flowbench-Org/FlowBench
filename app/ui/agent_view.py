@@ -32,6 +32,7 @@ from qfluentwidgets import (BodyLabel, CaptionLabel, CheckBox, ComboBox, Compact
                             SimpleCardWidget, StrongBodyLabel, SubtitleLabel,
                             getFont, isDarkTheme, themeColor, Theme)
 
+from agent.transport import number_text
 from app.services import agent_limits
 from app.services.agent_control import ControllerClient, RelayControllerClient
 from app.services.remote_monitor import remote_monitor
@@ -100,8 +101,32 @@ def agent_os(agent) -> str:
 
 def limits_text(limits) -> str:
     """An agent's reported limits in one line."""
-    return L(f"上限 {limits['max_rate']:g} QPS · {limits['max_duration']} 秒 · {limits['max_threads']} 线程",
-             f"Limits {limits['max_rate']:g} QPS · {limits['max_duration']} s · {limits['max_threads']} threads")
+    return L(f"上限 {number_text(limits['max_rate'])} QPS · {limits['max_duration']} 秒 · {limits['max_threads']} 线程",
+             f"Limits {number_text(limits['max_rate'])} QPS · {limits['max_duration']} s · {limits['max_threads']} threads")
+
+
+# Servers listed by name in the over-limit dialog; the rest only in the log,
+# so the dialog's buttons stay inside the window.
+FIT_LIST_MAX = 8
+
+
+def clock_text(skew) -> str:
+    """A warning when a server's clock is a minute or more off this
+    computer's (known for agents on the relay), else ""."""
+    try:
+        skew = float(skew)
+    except (TypeError, ValueError):
+        return ""
+    if not (abs(skew) >= 60 and abs(skew) < float("inf")):
+        return ""
+    minutes = max(1, round(abs(skew) / 60))
+    if skew > 0:
+        return L(f"服务器时钟比本机快约 {minutes} 分钟；相差超过 5 分钟时，节点会拒绝发来的命令。",
+                 f"The server's clock is about {minutes} min ahead of this computer's; "
+                 f"beyond 5 minutes the agent refuses commands.")
+    return L(f"服务器时钟比本机慢约 {minutes} 分钟；相差超过 5 分钟时，节点会拒绝发来的命令。",
+             f"The server's clock is about {minutes} min behind this computer's; "
+             f"beyond 5 minutes the agent refuses commands.")
 
 
 def problem_text(field, asked, allowed) -> str:
@@ -109,7 +134,8 @@ def problem_text(field, asked, allowed) -> str:
     if field == "protocol":
         return L(f"不支持 {asked} 协议", f"does not support {asked}")
     if field == "rate":
-        return L(f"速率 {asked:g} QPS（上限 {allowed:g}）", f"rate {asked:g} QPS (limit {allowed:g})")
+        asked, allowed = number_text(asked), number_text(allowed)
+        return L(f"速率 {asked} QPS（上限 {allowed}）", f"rate {asked} QPS (limit {allowed})")
     if field == "duration":
         return L(f"时长 {asked} 秒（上限 {allowed}）", f"duration {asked} s (limit {allowed})")
     if field == "threads":
@@ -124,6 +150,17 @@ def refusal_text(error) -> str:
     if found is None:
         return str(error)
     kind, asked, limit = found
+    if kind == "clock":
+        return L(f"命令时间和节点的时钟相差 {asked} 秒，节点拒绝了它；请检查服务器和本机的系统时间",
+                 f"the command's time is {asked} s off the agent's clock, so it was refused; "
+                 f"check the time on the server and on this computer")
+    if kind == "not_positive":
+        return {
+            "rate": L("速率必须大于 0", "the rate must be more than 0"),
+            "duration": L("时长必须大于 0", "the duration must be more than 0"),
+            "threads": L("线程数必须大于 0", "the thread count must be more than 0"),
+            "packet_size": L("数据包大小必须大于 0", "the packet size must be more than 0"),
+        }[asked]
     reason = {
         "rate": L("速率超过节点上限", "the rate is over the agent's limit"),
         "duration": L("时长超过节点上限", "the duration is over the agent's limit"),
@@ -217,8 +254,9 @@ class AgentRow(QWidget):
         limits = agent_limits.reported_limits(agent)
         self.limits = limits_text(limits) if limits else L("未报告上限（旧版节点）",
                                                            "Limits not reported (older agent)")
-        self.setToolTip("\n".join(part for part in (self.title, self.details, platform_name, self.limits)
-                                  if part))
+        self.clock = clock_text(agent.get("clock_skew"))
+        self.setToolTip("\n".join(part for part in (self.title, self.details, platform_name, self.limits,
+                                                     self.clock) if part))
         self.setAccessibleName(f"{self.title} — {self.details} — {self.status}")
 
     def enterEvent(self, event):
@@ -930,7 +968,7 @@ class AgentView(ScrollArea):
                 self._show_error(str(exc))
                 return
             self._async("generate", lambda: self._provision_and_package(
-                client, name, str(output_path), limits))
+                client, name, str(output_path), limits, hub_url=url))
             return
 
         public_address = dialog.server_address()
@@ -1010,10 +1048,10 @@ class AgentView(ScrollArea):
     def _limits_note(limits):
         """The README's paragraph about the node's limits."""
         return "\n\n" + L(
-            f"节点上限：每秒最多 {limits['max_rate']:g} 次请求，单个任务最长 {limits['max_duration']} 秒，"
+            f"节点上限：每秒最多 {number_text(limits['max_rate'])} 次请求，单个任务最长 {limits['max_duration']} 秒，"
             f"最多 {limits['max_threads']} 个线程。要调整，就改服务器上 agent.json 里的 "
             "max_rate、max_duration、max_threads，然后重启节点。",
-            f"Agent limits: at most {limits['max_rate']:g} requests per second, "
+            f"Agent limits: at most {number_text(limits['max_rate'])} requests per second, "
             f"{limits['max_duration']} s per job and {limits['max_threads']} threads. To change them, "
             "edit max_rate, max_duration and max_threads in agent.json on the server, then restart the agent.")
 
@@ -1255,7 +1293,11 @@ exec python3 agent/server_agent.py --config agent/agent.json
             "ca_file": "",
         }
 
-    def _provision_and_package(self, client, name, output, limits=None):
+    def _provision_and_package(self, client, name, output, limits=None, hub_url=None):
+        """Runs on a worker thread when ``hub_url`` is given; without it the
+        Hub field is read, which only the GUI thread may do."""
+        if hub_url is None:
+            hub_url = self.hubEdit.text()
         limits = self._node_limits(limits)
         record = client.provision_agent(name)
         exe, linux_root = self._node_payload_paths()
@@ -1266,7 +1308,7 @@ exec python3 agent/server_agent.py --config agent/agent.json
                                       "The installed app is missing agent payload files; rebuild the main app."))
         allowed_targets = sorted({str(item.get("host")) for item in settings.authorized if item.get("host")})
         agent_config = {
-            "hub_url": self.hubEdit.text().strip().rstrip("/"),
+            "hub_url": str(hub_url).strip().rstrip("/"),
             "agent_id": record["agent_id"],
             "token": record["token"],
             "allowed_targets": allowed_targets,
@@ -1450,9 +1492,9 @@ exec python3 agent/server_agent.py --config agent/agent.json
     def _confirm_high_rate(self, host, rate) -> bool:
         confirm = MessageBox(
             L("高请求速率二次确认", "High Rate Confirmation"),
-            L(f"服务器节点将使用压力测试页配置向 {host} 发送最高 {rate:g} QPS。\n"
+            L(f"服务器节点将使用压力测试页配置向 {host} 发送最高 {number_text(rate)} QPS。\n"
               "请再次确认目标已获授权且能够承受该速率。",
-              f"The server agent will use the Stress page configuration against {host}, up to {rate:g} QPS.\n"
+              f"The server agent will use the Stress page configuration against {host}, up to {number_text(rate)} QPS.\n"
               "Confirm that the target is authorized and can handle this rate."),
             self.window())
         return bool(confirm.exec())
@@ -1463,6 +1505,18 @@ exec python3 agent/server_agent.py --config agent/agent.json
         box.yesButton.setText(L("按上限运行", "Run within limits"))
         box.cancelButton.setText(L("取消", "Cancel"))
         return bool(box.exec())
+
+    def _short_list(self, heading, lines):
+        """``lines`` for a dialog: past FIT_LIST_MAX, the first few and how
+        many more, with every line written to the log under ``heading``."""
+        if len(lines) <= FIT_LIST_MAX:
+            return list(lines)
+        self._log(heading)
+        for line in lines:
+            self._log(line)
+        more = len(lines) - FIT_LIST_MAX
+        return lines[:FIT_LIST_MAX] + [L(f"……还有 {more} 台，完整列表见日志",
+                                         f"…and {more} more; the log lists them all")]
 
     def _fit_to_agents(self, agent_ids, job):
         """{agent_id: job} within the limits each agent reported, after asking
@@ -1489,12 +1543,13 @@ exec python3 agent/server_agent.py --config agent/agent.json
         if not lines:
             return jobs
         if not jobs:
-            self._show_error(L("所选节点都不能运行这个任务：", "None of the selected agents can run this job: ")
-                             + L("；", "; ").join(line.lstrip("• ") for line in lines))
+            heading = L("所选节点都不能运行这个任务：", "None of the selected agents can run this job: ")
+            shown = self._short_list(heading, lines)
+            self._show_error(heading + L("；", "; ").join(line.lstrip("• ") for line in shown))
             return None
-        text = (L("这次任务超过了部分节点的上限，直接发送会被节点拒绝：",
-                  "This job is over the limits of some agents, which would refuse it:")
-                + "\n\n" + "\n".join(lines) + "\n\n"
+        heading = L("这次任务超过了部分节点的上限，直接发送会被节点拒绝：",
+                    "This job is over the limits of some agents, which would refuse it:")
+        text = (heading + "\n\n" + "\n".join(self._short_list(heading, lines)) + "\n\n"
                 + L("可以按各节点的上限运行；也可以取消，调低压力测试页的设置，或在服务器的 agent.json 里调高上限后重启节点。",
                     "Run it within each agent's limits, or cancel and lower the Stress page settings, "
                     "or raise the limits in agent.json on the server and restart the agent."))
@@ -1502,8 +1557,8 @@ exec python3 agent/server_agent.py --config agent/agent.json
             self._log(L("已取消：任务超出节点上限。", "Cancelled: the job is over the agents' limits."))
             return None
         for name, fitted in lowered:
-            self._log(L(f"节点 {name} 按上限运行：{fitted['rate']:g} QPS、{fitted['duration']} 秒、{fitted['threads']} 线程",
-                        f"Agent {name} runs within its limits: {fitted['rate']:g} QPS, "
+            self._log(L(f"节点 {name} 按上限运行：{number_text(fitted['rate'])} QPS、{fitted['duration']} 秒、{fitted['threads']} 线程",
+                        f"Agent {name} runs within its limits: {number_text(fitted['rate'])} QPS, "
                         f"{fitted['duration']} s, {fitted['threads']} threads"))
         return jobs
 

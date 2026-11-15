@@ -9,6 +9,7 @@ instead of leaving a half-updated folder behind.
 """
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
@@ -174,6 +175,20 @@ def free_space(target: Path) -> Optional[int]:
         return None
 
 
+def extract_error(folder: Path, exc: OSError) -> InstallError:
+    """An error while writing the new files, in words the user can act on."""
+    if exc.errno == errno.ENOSPC or getattr(exc, "winerror", None) in (39, 112):
+        return InstallError(
+            f"There is not enough free space on the drive of {folder}. "
+            "Free some space or choose another folder.",
+            f"{folder} 所在的磁盘空间不足。请清理出一些空间，或者换一个文件夹。")
+    if isinstance(exc, PermissionError) or exc.errno == errno.EROFS:
+        return InstallError(
+            f"No permission to write to {folder}. Choose another folder.",
+            f"没有权限写入 {folder}，请换一个文件夹。")
+    return InstallError(f"Could not extract the files: {exc}", f"解压文件时出错：{exc}")
+
+
 def _sibling(target: Path, kind: str) -> Path:
     return target.parent / f"{target.name}.{kind}-{secrets.token_hex(4)}"
 
@@ -270,12 +285,9 @@ class InstallJob:
             if not (staging / APP_EXE).is_file():
                 raise InstallError(f"The payload does not contain {APP_EXE}.",
                                    f"安装数据里缺少 {APP_EXE}。")
-        except PermissionError as exc:
+        except OSError as exc:
             remove_tree(staging)
-            raise InstallError(
-                f"No permission to write to {self.target.parent}. "
-                "Choose another folder.",
-                f"没有权限写入 {self.target.parent}，请换一个文件夹。") from exc
+            raise extract_error(self.target.parent, exc) from exc
         except BaseException:
             remove_tree(staging)
             raise

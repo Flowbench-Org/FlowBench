@@ -14,6 +14,7 @@ os.environ.setdefault("APPDATA", os.path.join(tempfile.gettempdir(), "FlowBench-
 
 from PySide6.QtCore import QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import QImage, QPainter, QRegion
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
 from qfluentwidgets import Theme, isDarkTheme, qconfig, setTheme
 
@@ -464,6 +465,22 @@ class WizardTests(unittest.TestCase):
         self.assertTrue(win.space_low)
         win.backButton.click()
         self.assertIs(win.pages.currentWidget(), win.welcomePage)
+
+    def test_typing_a_path_checks_the_folder_once_typing_pauses(self):
+        win = self.wizard()
+        win.startButton.click()
+        checked = []
+        real = core.free_space
+        with mock.patch.object(core, "free_space", side_effect=lambda t: checked.append(t) or real(t)):
+            for end in range(1, 12):
+                win.pathEdit.setText(str(self.root / "Elsewhere" / "FlowBench"[:end]))
+            self.assertEqual(checked, [])                 # nothing yet while typing
+            self.assertTrue(win.defaultButton.isVisible())
+            self.assertTrue(wait_for(lambda: checked, 3000))
+            QTest.qWait(500)
+        self.assertEqual(checked, [self.root / "Elsewhere" / "FlowBench"])
+        win.defaultButton.click()                         # an explicit choice is checked at once
+        self.assertFalse(win.defaultButton.isVisible())
 
     def test_progress_fills_the_logo(self):
         win = self.wizard()
