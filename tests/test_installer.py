@@ -848,6 +848,31 @@ class UpdaterTests(unittest.TestCase):
         self.assertEqual((args.pid, args.dir, args.lang, args.theme, args.accent),
                          (7, str(Path("/apps/FlowBench")), "zh", "dark", "#112233"))
 
+    def test_a_damaged_installer_says_so_in_the_chosen_language(self):
+        from PySide6.QtWidgets import QMessageBox
+        from flowbench_installer import setup_main
+        app()
+        payload = self.root / "payload"
+        payload.mkdir()
+        shown = []
+        no_prefs = {"lang": None, "theme": None, "accent": None}
+        with mock.patch.object(QMessageBox, "critical", side_effect=lambda *a: shown.append(a[1:])), \
+                mock.patch.object(core, "read_user_prefs", return_value=no_prefs), \
+                mock.patch("qfluentwidgets.setTheme"), mock.patch("qfluentwidgets.setThemeColor"):
+            self.assertEqual(setup_main.main(["--payload-dir", str(payload), "--lang", "zh"]), 1)
+            (payload / core.PAYLOAD_INFO_NAME).write_text(
+                json.dumps({"app": "FlowBench", "version": "9.9.9"}), encoding="utf-8")
+            self.assertEqual(setup_main.main(["--payload-dir", str(payload), "--lang", "zh"]), 1)
+            self.assertEqual(setup_main.main(["--payload-dir", str(payload), "--lang", "en"]), 1)
+            with mock.patch.object(winplat, "system_prefers_chinese", return_value=True):
+                self.assertEqual(setup_main.main(["--payload-dir", str(payload)]), 1)
+        (title, missing_info), (_, missing_archive), english, (_, system) = shown
+        self.assertEqual(title, "FlowBench 安装程序")
+        self.assertIn("安装程序的数据缺失或已损坏", missing_info)
+        self.assertEqual(missing_archive, "安装程序缺少安装数据。")
+        self.assertEqual(english, ("FlowBench Setup", "The installer is missing its payload."))
+        self.assertEqual(system, "安装程序缺少安装数据。")              # no language saved: the system's
+
     def test_cleanup_keeps_only_newer_complete_downloads(self):
         names = ["FlowBench-Setup-1.2.6.exe", "FlowBench-Setup-1.2.7.exe",
                  "FlowBench-Setup-1.2.8.exe", "FlowBench-Setup-1.2.9.exe.part",
