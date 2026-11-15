@@ -244,9 +244,11 @@ class UninstallWindow(InstallerWindow):
 
     # -- flow ----------------------------------------------------------------
 
-    def start_uninstall(self):
+    def start_uninstall(self) -> bool:
+        """Start removing the files; False when it did not start (FlowBench
+        is still running and the user cancelled)."""
         if self.busy:
-            return
+            return False
         self.session = UninstallSession(
             self.target, remove_user_data=self.removeDataCheck.isChecked(),
             data_dir=self.data_dir, parent_pid=self.parent_pid,
@@ -257,7 +259,7 @@ class UninstallWindow(InstallerWindow):
                     self.t("FlowBench 正在运行", "FlowBench is running"),
                     self.t("请先退出 FlowBench（右键托盘图标 → 退出），然后点“重试”。",
                            "Quit FlowBench first (right-click the tray icon → Quit), then click Retry.")):
-                return
+                return False
         self.phase = "running"
         self._error = None
         self._progress = (0, "")
@@ -273,6 +275,7 @@ class UninstallWindow(InstallerWindow):
         self.worker.succeeded.connect(self._on_success)
         self.worker.failed.connect(self._on_failure)
         self.worker.start()
+        return True
 
     def _on_progress(self, pct: int, detail: str):
         self._progress = (pct, detail)
@@ -298,9 +301,9 @@ class UninstallWindow(InstallerWindow):
                 self.t("安装文件夹正在被使用", "The install folder is in use"),
                 self.t("请退出 FlowBench，并关闭打开了这个文件夹的资源管理器窗口，然后点“重试”。",
                        "Quit FlowBench and close any Explorer window showing this folder, "
-                       "then click Retry.")):
-            self.start_uninstall()
+                       "then click Retry.")) and self.start_uninstall():
             return
+        # Also when the retry was cancelled: the page offers Close and Retry.
         self.phase = "failed"
         self._error = exc
         self.progressBar.error()

@@ -553,6 +553,33 @@ class UninstallWindowTests(unittest.TestCase):
         self.assertFalse(self.target.exists())
         win.close()
 
+    def test_cancelling_the_retry_of_a_locked_folder_offers_close_and_retry(self):
+        win = self.window()
+        asked = []
+
+        def ask_retry(title, text):
+            asked.append(title)
+            if len(asked) == 1:                   # "folder in use": Retry...
+                self.platform.running = [4321]    # ...but FlowBench is still running
+                return True
+            return False                          # "FlowBench is running": Cancel
+        win.ask_retry = ask_retry
+        with mock.patch.object(core, "uninstall_files",
+                               side_effect=core.AppInUseError("locked", "被占用")):
+            win.uninstallButton.click()
+            self.assertTrue(wait_for(lambda: len(asked) == 2, 10000))
+        self.assertEqual(asked, ["The install folder is in use", "FlowBench is running"])
+        self.assertIs(win.pages.currentWidget(), win.progressPage)
+        self.assertEqual(win.phase, "failed")
+        self.assertEqual(win.progressTitle.text(), "Uninstall did not finish")
+        self.assertTrue(win.closeButton.isVisible() and win.retryButton.isVisible())
+        self.assertTrue((self.target / "FlowBench.exe").exists())
+        self.platform.running = []
+        win.retryButton.click()                   # FlowBench has been closed now
+        self.assertTrue(wait_for(lambda: win.pages.currentWidget() is win.donePage, 10000))
+        self.assertFalse(self.target.exists())
+        win.close()
+
     def test_chinese_text(self):
         win = self.window(chinese=True)
         self.assertEqual(win.windowTitle(), "卸载 FlowBench")
