@@ -66,6 +66,7 @@ class AppSettings:
         "agent_hub_token": "",        # 服务器节点控制令牌
         "agent_hub_ca": "",           # 一体化包生成的自签名 CA 文件
         "github_login": "",           # 最近一次成功授权的 GitHub 登录名（离线识别作者）
+        "engine": "auto",             # 本地压测引擎：auto / rust / python（原生 Rust 引擎，见 ENGINE.md）
     }
 
     def __init__(self):
@@ -136,6 +137,9 @@ class AppSettings:
         for key in ("log_dir", "skip_version", "github_token", "github_login"):
             if type(raw.get(key, cls.DEFAULTS[key])) is not str:
                 clean[key] = cls.DEFAULTS[key]
+
+        if raw.get("engine") not in ("auto", "rust", "python"):
+            clean["engine"] = cls.DEFAULTS["engine"]
 
         if type(raw.get("stress_form", {})) is not dict:
             clean["stress_form"] = {}
