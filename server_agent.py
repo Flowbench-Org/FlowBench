@@ -512,10 +512,18 @@ class CommandCursor:
             pass
 
     def save(self):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        temp = self.path.with_suffix(self.path.suffix + ".tmp")
-        temp.write_text(json.dumps({"cursor": self.cursor, "epoch": self.epoch}), encoding="utf-8")
-        os.replace(temp, self.path)
+        """Write the state file.  Failing to write it (a read-only folder, a
+        full disk) must not cost the command: it is logged and the agent
+        goes on."""
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            temp = self.path.with_suffix(self.path.suffix + ".tmp")
+            temp.write_text(json.dumps({"cursor": self.cursor, "epoch": self.epoch}), encoding="utf-8")
+            os.replace(temp, self.path)
+            return True
+        except OSError as exc:
+            print(f"[agent] cannot save {self.path}: {exc}", flush=True)
+            return False
 
     def hub_restarted(self, epoch) -> bool:
         """Note the hub's epoch; True when the hub restarted since the cursor

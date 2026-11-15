@@ -153,6 +153,17 @@ class HubRestartTests(unittest.TestCase):
         self.assertIsNone(state.poll("a1", self.TOKEN, 9))
         self.assertNotEqual(HubState(self.HUB).epoch, state.epoch)
 
+    def test_a_state_file_that_cannot_be_written_does_not_cost_the_command(self):
+        blocker = self.tmp / "not-a-folder"
+        blocker.write_text("a file where the state folder should be")
+        server = self.start_hub()
+        loop = self.agent(server, state_path=blocker / "agent.json.state.json")
+        for name in ("t1.example", "t2.example"):
+            self.sync(server, name)
+            loop.step()
+            self.assertEqual(self.targets(loop), [name])
+        self.assertTrue(any("cannot save" in str(call) for call in self.printed.call_args_list))
+
     def test_cursor_is_kept_across_agent_restarts(self):
         path = self.tmp / "state.json"
         cursor = CommandCursor(path)
