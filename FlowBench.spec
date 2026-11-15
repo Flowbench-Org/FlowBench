@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# FlowBench 打包配置（onedir 模式，供 Inno Setup 打安装包）：
+# FlowBench 打包配置（onedir 模式，再由 tools/make_payload.py 和 Setup.spec 打成自带的安装程序）：
 import os
 
 # 排除环境中无关的可编辑安装包（phantom_backend 等），

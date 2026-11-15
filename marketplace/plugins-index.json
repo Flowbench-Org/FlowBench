@@ -1,6 +1,6 @@
 {
   "api": 1,
-  "updated": "2026-10-24",
+  "updated": "2026-11-15",
   "plugins": [
     {
       "id": "zh_tw",
@@ -134,7 +134,7 @@
         "Japanese UI, dialogs and dynamic messages for FlowBench; supports light and dark themes."
       ],
       "category": "ui",
-      "date": "2026-11-10",
+      "date": "2026-11-15",
       "file": "japanese.py",
       "sha256": "f714ae7bb563525b6ff34c0472febfc6419419ff42af7481849f5fa2b02a8117",
       "min_app": "1.0.7",

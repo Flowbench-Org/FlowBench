@@ -124,6 +124,10 @@ Copy `agent/agent.example.json` to `agent.json` on the server:
 
 `allowed_targets` must be exact hostnames/IPs. Tasks with targets not in this list will be rejected by the Agent. Remote tasks are also subject to all caps set in the Agent configuration.
 
+`poll_interval`, `heartbeat_interval`, `job_heartbeat_interval` and `request_timeout` are in seconds, more than 0 and at most 3600; the Agent stops at start with a clear message when one is not, for example `"8s"`.
+
+The Agent keeps the number of the last Hub command it took in `agent.json.state.json`, next to `agent.json`, so a restarted Agent does not run old commands again. The Hub numbers commands from 1 every time it starts; the Agent notices the restart, takes the new commands from the start and registers again. If the state file cannot be written (a read-only folder or a full disk), the Agent says so and keeps running commands.
+
 Test‑run on the server:
 
 ```powershell
@@ -134,7 +138,7 @@ Seeing `online as server-01` means the Agent is online. The server only needs ou
 
 ### Limits
 
-`max_rate` (requests per second), `max_duration` (seconds per job), `max_threads` and `max_packet_size` (bytes) are the most a job may ask for, and `allowed_protocols` the protocols it may use. The Agent refuses anything above them and says by how much, for example `command rejected: rate exceeds agent limit: 500 > 100`. When it starts, it stops with a clear message if one of the limits is not a positive number.
+`max_rate` (requests per second), `max_duration` (seconds per job), `max_threads` and `max_packet_size` (bytes) are the most a job may ask for, and `allowed_protocols` the protocols it may use. The Agent refuses anything above them and says by how much, for example `command rejected: rate exceeds agent limit: 500 > 100`. A job asking for 0 or less is refused as such, for example `duration must be positive`. When it starts, it stops with a clear message if one of the limits is not a positive number.
 
 The **Generate Server Node** dialog sets the rate, duration and thread limits (100 QPS, 300 s and 32 threads unless you change them); the bundle's `README.txt` repeats them. To change them later, edit `agent.json` on the server and restart the Agent.
 
