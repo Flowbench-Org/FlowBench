@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from unittest import mock
 
@@ -44,6 +45,31 @@ import json, sys
 sys.stdout.write(json.dumps({"type": "hello", "engine": "fake", "version": "9", "protocol": 1}) + "\n")
 sys.stdout.flush()
 sys.stdin.readline()   # read the start command, then exit without a report
+'''
+
+LATE_SNAPSHOT_ENGINE = r'''
+import json, sys
+def emit(o):
+    sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+emit({"type": "hello", "engine": "fake", "version": "1", "protocol": 1})
+cfg = json.loads(sys.stdin.readline())["config"]
+emit({"type": "report", "target": cfg.get("target", ""), "protocol": cfg.get("protocol", ""),
+      "duration": 1.0, "total": 1, "success": 1, "fail": 0, "avg": 1.0, "p50": 1.0,
+      "p90": 1.0, "p99": 1.0, "traffic_mb": 0.0, "bytes_tx": 0, "rate_limit": 0, "errors": {}})
+emit({"type": "snapshot", "running": True, "total": 99, "success": 99, "fail": 0,
+      "tx": 0, "qps": 0.0, "avg": 0.0, "active": 0, "progress": 1.0, "last_error": ""})
+'''
+
+ERROR_THEN_WAIT_ENGINE = r'''
+import json, sys
+def emit(o):
+    sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+emit({"type": "hello", "engine": "fake", "version": "1", "protocol": 1})
+sys.stdin.readline()
+emit({"type": "error", "message": "bad command: boom"})
+# Mimic the real engine: keep reading stdin, exit only on EOF (stdin closed).
+while sys.stdin.readline() != "":
+    pass
 '''
 
 _real_popen = subprocess.Popen
@@ -89,6 +115,34 @@ class RustStressJobTests(unittest.TestCase):
         with mock.patch.object(engine_bridge.subprocess, "Popen", _py_popen):
             started = job.start()
         return job, started, snaps, reports, done
+
+    def _wait_exit(self, proc, timeout=4.0):
+        deadline = time.time() + timeout
+        while proc.poll() is None and time.time() < deadline:
+            time.sleep(0.02)
+        return proc.poll()
+
+    def test_engine_is_reaped_and_stdin_closed_after_a_report(self):
+        job, started, snaps, reports, done = self._run(GOOD_ENGINE)
+        self.assertTrue(started)
+        self.assertTrue(done.wait(timeout=10))
+        self.assertIsNotNone(self._wait_exit(job.proc), "engine not reaped after report")
+        self.assertTrue(job.proc.stdin.closed)
+
+    def test_snapshot_after_report_is_dropped(self):
+        job, started, snaps, reports, done = self._run(LATE_SNAPSHOT_ENGINE)
+        self.assertTrue(started)
+        self.assertTrue(done.wait(timeout=10))
+        self._wait_exit(job.proc)
+        time.sleep(0.2)   # let the reader process the trailing snapshot line
+        self.assertEqual(snaps, [])
+
+    def test_error_event_reports_and_reaps_the_engine(self):
+        job, started, snaps, reports, done = self._run(ERROR_THEN_WAIT_ENGINE)
+        self.assertTrue(started)
+        self.assertTrue(done.wait(timeout=10))
+        self.assertEqual(reports[0]["errors"], {"engine": 1})
+        self.assertIsNotNone(self._wait_exit(job.proc), "engine not reaped after an error event")
 
     def test_known_protocol_streams_snapshots_and_report(self):
         job, started, snaps, reports, done = self._run(GOOD_ENGINE)
@@ -173,6 +227,32 @@ class EngineSelectionTests(unittest.TestCase):
                                   lambda d: None, lambda d: None, {"engine": "auto"})
             self.assertTrue(job.start())
             self.assertIsInstance(job._impl, _DummyWorker)
+
+
+class EngineJobSanitizerTests(unittest.TestCase):
+    def test_coerces_headers_drops_junk_and_stays_serializable(self):
+        from agent.engine_bridge import _engine_job
+        job = _engine_job({
+            "target": "h", "protocol": "http", "url": None, "port": "80",
+            "rate": 5, "duration": 3, "threads": 2, "packet_size": 64, "timeout": 2000.0,
+            "headers": {"X-Retry": 3, "A": "b"}, "junk": object(), "extra": float("nan"),
+        })
+        self.assertEqual(set(job), {"target", "protocol", "url", "port", "rate",
+                                    "duration", "threads", "packet_size", "timeout", "headers"})
+        self.assertEqual(job["protocol"], "HTTP")
+        self.assertEqual(job["url"], "")
+        self.assertEqual(job["port"], 80)
+        self.assertEqual(job["timeout"], 2000)
+        self.assertEqual(job["headers"], {"X-Retry": "3", "A": "b"})
+        json.dumps(job, allow_nan=False)   # must not raise
+
+    def test_non_finite_and_bool_numbers_fall_back(self):
+        from agent.engine_bridge import _engine_job
+        job = _engine_job({"rate": float("nan"), "duration": float("inf"), "threads": True})
+        self.assertEqual(job["rate"], 0.0)
+        self.assertEqual(job["duration"], 0.0)
+        self.assertEqual(job["threads"], 1)
+        json.dumps(job, allow_nan=False)
 
 
 if __name__ == "__main__":

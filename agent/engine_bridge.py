@@ -14,6 +14,7 @@ fails to hand-shake.
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import sys
@@ -44,13 +45,15 @@ def find_engine_binary(config=None):
     """
     config = config or {}
 
+    # Return absolute paths: a bare relative name would make Popen do a
+    # PATH search on POSIX, silently missing a file next to the cwd.
     override = str(os.environ.get("FLOWBENCH_ENGINE") or "").strip()
     if override and os.path.isfile(override):
-        return override
+        return os.path.abspath(override)
 
     cfg_path = str(config.get("engine_path") or "").strip()
     if cfg_path and os.path.isfile(cfg_path):
-        return cfg_path
+        return os.path.abspath(cfg_path)
 
     dirs = []
     if getattr(sys, "frozen", False):
@@ -80,6 +83,48 @@ def _spawn_kwargs():
     if os.name == "nt":
         return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
     return {}
+
+
+def _engine_job(config):
+    """A clean job object the engine's strict JSON parser accepts: known keys
+    only, headers coerced to str->str, url never null, numbers coerced and
+    finite. Keeps a job that passed validate_job (which preserves extra or
+    oddly typed fields) from being rejected by the engine's serde parser.
+    """
+    config = config or {}
+
+    def _int(value, default):
+        if isinstance(value, bool):
+            return default
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _float(value, default):
+        if isinstance(value, bool):
+            return default
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return default
+        return number if math.isfinite(number) else default
+
+    headers = config.get("headers")
+    clean_headers = ({str(k): str(v) for k, v in headers.items()}
+                     if isinstance(headers, dict) else None)
+    return {
+        "target": str(config.get("target", "")),
+        "protocol": str(config.get("protocol", "")).upper(),
+        "url": str(config.get("url") or ""),
+        "port": _int(config.get("port"), 0),
+        "rate": _float(config.get("rate"), 0.0),
+        "duration": _float(config.get("duration"), 0.0),
+        "threads": _int(config.get("threads"), 1),
+        "packet_size": _int(config.get("packet_size"), 1),
+        "timeout": _int(config.get("timeout"), 5000),
+        "headers": clean_headers,
+    }
 
 
 class RustStressJob:
@@ -135,16 +180,29 @@ class RustStressJob:
 
         try:
             command = json.dumps(
-                {"type": "start", "config": self.config}, ensure_ascii=False
+                {"type": "start", "config": _engine_job(self.config)},
+                ensure_ascii=False, allow_nan=False,
             )
-            self.proc.stdin.write(command + "\n")
-            self.proc.stdin.flush()
-        except (OSError, ValueError):
+        except (ValueError, TypeError):
             self._terminate()
             return False
 
-        self._job_sent = True
+        # Commit the job before writing the start line, so a crash the
+        # instant the engine reads it still yields a report from _finish
+        # (which reports only when _job_sent is set). Roll back on failure.
+        with self._lock:
+            self._job_sent = True
         self.running = True
+        try:
+            self.proc.stdin.write(command + "\n")
+            self.proc.stdin.flush()
+        except (OSError, ValueError):
+            with self._lock:
+                self._job_sent = False
+                self._reported = True  # suppress a synthesized report
+            self.running = False
+            self._terminate()
+            return False
         return True
 
     def stop(self):
@@ -179,6 +237,8 @@ class RustStressJob:
                     self.engine_version = message.get("version")
                     self._hello.set()
                 elif kind == "snapshot":
+                    if self._reported:
+                        continue  # ignore a snapshot that trails the report
                     message.pop("type", None)
                     self.on_snapshot(message)
                 elif kind == "report":
@@ -188,6 +248,7 @@ class RustStressJob:
                     self._emit_report(
                         self._error_report(message.get("message", "engine error"))
                     )
+                    break  # the engine will not run this job; stop reading
         except (OSError, ValueError):
             pass
         finally:
@@ -198,6 +259,13 @@ class RustStressJob:
     def _finish(self):
         proc = self.proc
         if proc is not None:
+            # Close stdin so an engine still waiting on it (EOF == stop)
+            # exits, and so the pipe fd is not leaked.
+            try:
+                if proc.stdin and not proc.stdin.closed:
+                    proc.stdin.close()
+            except OSError:
+                pass
             try:
                 proc.wait(timeout=EXIT_TIMEOUT)
             except Exception:
