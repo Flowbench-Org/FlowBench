@@ -40,6 +40,8 @@ SUPPORTED_PROTOCOLS = {"HTTP", "HTTPS", "TCP"}
 # The most a job may ask for; the desktop reads them from the agent's
 # metadata and checks a job before sending it.
 LIMIT_TYPES = {"max_rate": float, "max_duration": int, "max_threads": int, "max_packet_size": int}
+# Seconds; metrics_interval has its own range.
+INTERVALS = ("poll_interval", "heartbeat_interval", "job_heartbeat_interval", "request_timeout")
 
 
 class AgentHTTPError(RuntimeError):
@@ -173,6 +175,19 @@ def load_config(path: Path):
         if not usable:
             raise ValueError(f"{key} must be a positive number")
         merged[key] = number
+    # Checked here so a typo such as "8s" stops the agent at start with this
+    # message, instead of a traceback or "control-plane retry" over and over.
+    for key in INTERVALS:
+        value = merged.get(key)
+        try:
+            if isinstance(value, bool):
+                raise TypeError
+            seconds = float(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{key} must be a number of seconds") from exc
+        if not (math.isfinite(seconds) and 0 < seconds <= 3600):
+            raise ValueError(f"{key} must be more than 0 and at most 3600 seconds")
+        merged[key] = seconds
     merged["metrics"] = merged.get("metrics", True) is not False
     try:
         metrics_interval = float(merged.get("metrics_interval", DEFAULTS["metrics_interval"]))

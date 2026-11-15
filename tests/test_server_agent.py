@@ -50,6 +50,27 @@ class AgentValidationTests(unittest.TestCase):
             }), encoding="utf-8")
             self.assertEqual(load_config(path)["allowed_targets"], [])
 
+    def test_intervals_are_checked_at_start(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "agent.json"
+
+            def load(**values):
+                path.write_text(json.dumps(dict({
+                    "hub_url": "http://127.0.0.1:8787", "agent_id": "a1",
+                    "token": "agent-token-1234567890"}, **values)), encoding="utf-8")
+                return load_config(path)
+            self.assertEqual(load()["poll_interval"], 2.0)
+            self.assertEqual(load(request_timeout="15")["request_timeout"], 15.0)
+            for key in ("poll_interval", "heartbeat_interval", "job_heartbeat_interval", "request_timeout"):
+                for bad in ("8s", True, None, [2]):
+                    with self.subTest(key=key, bad=bad), \
+                            self.assertRaisesRegex(ValueError, f"{key} must be a number of seconds"):
+                        load(**{key: bad})
+                for bad in (0, -1, float("inf"), 7200):
+                    with self.subTest(key=key, bad=bad), \
+                            self.assertRaisesRegex(ValueError, f"{key} must be more than 0"):
+                        load(**{key: bad})
+
     def test_target_sync_updates_allow_list(self):
         runtime = AgentRuntime(dict(self.config))
         runtime.handle({"type": "sync_targets", "targets": ["https://new.example/path"]})
