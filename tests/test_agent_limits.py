@@ -217,6 +217,20 @@ class AgentPageTests(unittest.TestCase):
         self.assertTrue(any("small runs within its limits: 100 QPS, 300 s, 32 threads" in line
                             for line in self.view._log_lines))
 
+    def test_many_servers_over_their_limits_keep_the_dialog_short(self):
+        from app.ui.agent_view import FIT_LIST_MAX
+        names = [f"hk-{i:02d}" for i in range(40)]
+        sent = self.run_job([agent(name) for name in names], names)
+        title, text = self.asked[0]
+        listed = [line for line in text.splitlines() if line.startswith("• ")]
+        self.assertEqual(len(listed), FIT_LIST_MAX)
+        self.assertIn(f"…and {40 - FIT_LIST_MAX} more; the log lists them all", text)
+        for name in names:                         # each one is in the log
+            self.assertTrue(any(line.endswith(f"• {name}: rate 500 QPS (limit 100), duration 600 s "
+                                              "(limit 300), threads 50 (limit 32)")
+                                for line in self.view._log_lines), name)
+        self.assertEqual(len(sent), 40)
+
     def test_cancelling_sends_nothing(self):
         self.answer = False
         sent = self.run_job([agent("small")], ["small"])

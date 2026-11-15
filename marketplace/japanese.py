@@ -810,6 +810,7 @@ _RESOURCES = [
     ('スレッド {#0}（上限 {#1}）', '线程 {#0}（上限 {#1}）', 'threads {#0} (limit {#1})'),
     ('パケット {#0} バイト（上限 {#1}）', '数据包 {#0} 字节（上限 {#1}）', 'packet size {#0} bytes (limit {#1})'),
     ('• {#0}：{#1}（スキップします）', '• {#0}：{#1}，将跳过', '• {#0}: {#1}; it will be skipped'),
+    ('…ほか {#0} 台。すべてログに記録しました', '……还有 {#0} 台，完整列表见日志', '…and {#0} more; the log lists them all'),
     ('ノード {#0} は上限内で実行します：{#1} QPS、{#2} 秒、{#3} スレッド', '节点 {#0} 按上限运行：{#1} QPS、{#2} 秒、{#3} 线程', 'Agent {#0} runs within its limits: {#1} QPS, {#2} s, {#3} threads'),
     ('サーバーノード {#0} がタスクを拒否しました：{#1}', '服务器节点 {#0} 拒绝了任务：{#1}', 'Server node {#0} refused the job: {#1}'),
     ('ノードの上限：毎秒最大 {#0} リクエスト、1 タスク最長 {#1} 秒、最大 {#2} スレッド。変更するには、サーバーの agent.json で max_rate、max_duration、max_threads を編集してからノードを再起動してください。', '节点上限：每秒最多 {#0} 次请求，单个任务最长 {#1} 秒，最多 {#2} 个线程。要调整，就改服务器上 agent.json 里的 max_rate、max_duration、max_threads，然后重启节点。', 'Agent limits: at most {#0} requests per second, {#1} s per job and {#2} threads. To change them, edit max_rate, max_duration and max_threads in agent.json on the server, then restart the agent.'),

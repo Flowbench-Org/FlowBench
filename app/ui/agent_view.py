@@ -105,6 +105,11 @@ def limits_text(limits) -> str:
              f"Limits {number_text(limits['max_rate'])} QPS · {limits['max_duration']} s · {limits['max_threads']} threads")
 
 
+# Servers listed by name in the over-limit dialog; the rest only in the log,
+# so the dialog's buttons stay inside the window.
+FIT_LIST_MAX = 8
+
+
 def problem_text(field, asked, allowed) -> str:
     """One thing a job asks for that an agent does not allow."""
     if field == "protocol":
@@ -1473,6 +1478,18 @@ exec python3 agent/server_agent.py --config agent/agent.json
         box.cancelButton.setText(L("取消", "Cancel"))
         return bool(box.exec())
 
+    def _short_list(self, heading, lines):
+        """``lines`` for a dialog: past FIT_LIST_MAX, the first few and how
+        many more, with every line written to the log under ``heading``."""
+        if len(lines) <= FIT_LIST_MAX:
+            return list(lines)
+        self._log(heading)
+        for line in lines:
+            self._log(line)
+        more = len(lines) - FIT_LIST_MAX
+        return lines[:FIT_LIST_MAX] + [L(f"……还有 {more} 台，完整列表见日志",
+                                         f"…and {more} more; the log lists them all")]
+
     def _fit_to_agents(self, agent_ids, job):
         """{agent_id: job} within the limits each agent reported, after asking
         when a job must be lowered or an agent skipped; None when cancelled.
@@ -1498,12 +1515,13 @@ exec python3 agent/server_agent.py --config agent/agent.json
         if not lines:
             return jobs
         if not jobs:
-            self._show_error(L("所选节点都不能运行这个任务：", "None of the selected agents can run this job: ")
-                             + L("；", "; ").join(line.lstrip("• ") for line in lines))
+            heading = L("所选节点都不能运行这个任务：", "None of the selected agents can run this job: ")
+            shown = self._short_list(heading, lines)
+            self._show_error(heading + L("；", "; ").join(line.lstrip("• ") for line in shown))
             return None
-        text = (L("这次任务超过了部分节点的上限，直接发送会被节点拒绝：",
-                  "This job is over the limits of some agents, which would refuse it:")
-                + "\n\n" + "\n".join(lines) + "\n\n"
+        heading = L("这次任务超过了部分节点的上限，直接发送会被节点拒绝：",
+                    "This job is over the limits of some agents, which would refuse it:")
+        text = (heading + "\n\n" + "\n".join(self._short_list(heading, lines)) + "\n\n"
                 + L("可以按各节点的上限运行；也可以取消，调低压力测试页的设置，或在服务器的 agent.json 里调高上限后重启节点。",
                     "Run it within each agent's limits, or cancel and lower the Stress page settings, "
                     "or raise the limits in agent.json on the server and restart the agent."))
