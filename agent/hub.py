@@ -47,6 +47,11 @@ class HubState:
                     "commands": [],
                 }
         self.lock = threading.RLock()
+        # Commands are numbered 1, 2, 3, ... and kept only in memory, so the
+        # numbers start again whenever the hub starts.  Polls carry this
+        # epoch, which changes with every start, so an agent knows when to
+        # take the numbers from the start again.
+        self.epoch = secrets.token_hex(8)
 
     def _save_config(self):
         if not self.config_path:
@@ -132,6 +137,13 @@ class HubState:
             agent = self.authenticate_agent(agent_id, token)
             agent["online"] = True
             agent["last_seen"] = time.time()
+            if after > agent["next_seq"]:
+                # The agent got this far before the hub restarted.  Agents
+                # that do not know the epoch keep asking for what comes after
+                # their old number, so number the new commands after it.
+                for offset, item in enumerate(agent["commands"], 1):
+                    item["seq"] = after + offset
+                agent["next_seq"] = after + len(agent["commands"])
             for item in agent["commands"]:
                 if item["seq"] > after:
                     return item
@@ -209,7 +221,8 @@ class HubHandler(BaseHTTPRequestHandler):
                 except ValueError:
                     raise ValueError("after must be an integer")
                 item = self.state.poll(agent_id, self._bearer(), after)
-                return self._json(200, item or {"seq": after, "command": None})
+                return self._json(200, dict(item or {"seq": after, "command": None},
+                                            epoch=self.state.epoch))
             return self._json(404, {"error": "not_found"})
         except (KeyError, PermissionError, ValueError) as exc:
             return self._json(403 if isinstance(exc, PermissionError) else 400, {"error": str(exc)})

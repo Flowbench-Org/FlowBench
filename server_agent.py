@@ -492,47 +492,105 @@ def run_relay_agent(config, config_path):
         client.loop_stop()
 
 
+class CommandCursor:
+    """The last hub command this agent took, kept in a small state file so a
+    restarted agent does not run old commands again.
+
+    The hub numbers commands from 1 every time it starts and sends an epoch
+    that changes with each start; on a new epoch the cursor starts from 0.
+    """
+
+    def __init__(self, path):
+        self.path = Path(path)
+        self.cursor = 0
+        self.epoch = ""
+        try:
+            state = json.loads(self.path.read_text(encoding="utf-8"))
+            self.cursor = max(0, int(state.get("cursor", 0)))
+            self.epoch = str(state.get("epoch") or "")
+        except (OSError, ValueError, TypeError, AttributeError, json.JSONDecodeError):
+            pass
+
+    def save(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temp = self.path.with_suffix(self.path.suffix + ".tmp")
+        temp.write_text(json.dumps({"cursor": self.cursor, "epoch": self.epoch}), encoding="utf-8")
+        os.replace(temp, self.path)
+
+    def hub_restarted(self, epoch) -> bool:
+        """Note the hub's epoch; True when the hub restarted since the cursor
+        was taken (then the cursor starts again from 0)."""
+        epoch = str(epoch or "")
+        if not epoch or epoch == self.epoch:
+            return False
+        restarted = bool(self.epoch)
+        self.epoch = epoch
+        if restarted:
+            self.cursor = 0
+        self.save()
+        return restarted
+
+    def advance(self, seq) -> bool:
+        """Take command ``seq``; False when it was taken already."""
+        if seq <= self.cursor:
+            return False
+        self.cursor = seq
+        self.save()
+        return True
+
+
+class HubLoop:
+    """The agent's side of the HTTP hub: register, send heartbeats, take commands."""
+
+    def __init__(self, config, hub, runtime, cursor, sampler=None):
+        self.config = config
+        self.hub = hub
+        self.runtime = runtime
+        self.cursor = cursor
+        self.sampler = sampler
+        self.registered = False
+        self.last_heartbeat = 0.0
+
+    def step(self):
+        try:
+            now = time.monotonic()
+            if not self.registered:
+                self.hub.register(metadata(self.config))
+                self.registered = True
+                print(f"[agent] online as {self.config['agent_id']} (hub={self.config['hub_url']})", flush=True)
+            event = self.runtime.current_event()
+            if now - self.last_heartbeat >= heartbeat_interval(self.config, event, self.sampler is not None):
+                self.hub.heartbeat(with_system({"cursor": self.cursor.cursor, **event}, self.sampler))
+                self.last_heartbeat = now
+            item = self.hub.poll(self.cursor.cursor)
+            if self.cursor.hub_restarted(item.get("epoch")):
+                # What the hub knew about this agent (its limits, its state)
+                # is gone too: register again and report at once, then take
+                # the hub's commands from the start.
+                self.registered = False
+                self.last_heartbeat = 0.0
+                print("[agent] hub restarted; taking its commands from the start", flush=True)
+                return
+            seq = int(item.get("seq", self.cursor.cursor))
+            if self.cursor.advance(seq) and item.get("command"):
+                try:
+                    self.runtime.handle(item["command"])
+                except Exception as exc:
+                    self.runtime._set_event({"state": "error", "error": str(exc), "ts": time.time()})
+                    print(f"[agent] command rejected: {exc}", flush=True)
+        except Exception as exc:
+            self.registered = False
+            print(f"[agent] control-plane retry: {exc}", flush=True)
+
+
 def run_agent(config, config_path):
     if config.get("transport") == "mqtt_relay":
         return run_relay_agent(config, config_path)
     state_path = Path(config.get("state_file") or (str(config_path) + ".state.json")).expanduser().resolve()
-    try:
-        state = json.loads(state_path.read_text(encoding="utf-8"))
-        cursor = max(0, int(state.get("cursor", 0)))
-    except (OSError, ValueError, TypeError, json.JSONDecodeError):
-        cursor = 0
-    hub = HubClient(config, config_path)
-    runtime = AgentRuntime(config)
-    sampler = start_sampler(config)
-    registered = False
-    last_heartbeat = 0.0
+    loop = HubLoop(config, HubClient(config, config_path), AgentRuntime(config),
+                   CommandCursor(state_path), start_sampler(config))
     while True:
-        try:
-            now = time.monotonic()
-            if not registered:
-                hub.register(metadata(config)); registered = True
-                print(f"[agent] online as {config['agent_id']} (hub={config['hub_url']})", flush=True)
-            event = runtime.current_event()
-            if now - last_heartbeat >= heartbeat_interval(config, event, sampler is not None):
-                hub.heartbeat(with_system({"cursor": cursor, **event}, sampler))
-                last_heartbeat = now
-            item = hub.poll(cursor)
-            seq = int(item.get("seq", cursor))
-            if seq > cursor:
-                cursor = seq
-                state_path.parent.mkdir(parents=True, exist_ok=True)
-                temp = state_path.with_suffix(state_path.suffix + ".tmp")
-                temp.write_text(json.dumps({"cursor": cursor}), encoding="utf-8")
-                os.replace(temp, state_path)
-                if item.get("command"):
-                    try:
-                        runtime.handle(item["command"])
-                    except Exception as exc:
-                        runtime._set_event({"state": "error", "error": str(exc), "ts": time.time()})
-                        print(f"[agent] command rejected: {exc}")
-        except Exception as exc:
-            registered = False
-            print(f"[agent] control-plane retry: {exc}", flush=True)
+        loop.step()
         time.sleep(max(0.5, float(config["poll_interval"])))
 
 

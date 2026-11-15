@@ -17,6 +17,7 @@
 
 ### Fixed
 
+- Server agents connected to a Hub now take the commands sent after the Hub restarts. The Hub numbers each server's commands from 1 every time it starts and keeps them only in memory, while the agent remembers the last number it took (in `agent.json.state.json`) and only takes higher ones. So after the server rebooted, `start-all` was run again or the Hub crashed, **Start on server** said the job was sent while the server did nothing, until the Hub had queued more commands than before. The Hub now sends an epoch with every poll that changes each time it starts; an agent that sees a new one takes the Hub's commands from the start again, and registers again so the Hub knows its limits again. For agents from older versions, the Hub numbers new commands after the number the agent asks for.
 - The app no longer stutters for minutes after a heavy local test. The Monitor's TCP connection count listed every connection through psutil once a second, holding Python's lock meanwhile, and a heavy test leaves tens of thousands of connections waiting to close (TIME_WAIT) for about four minutes on Windows. The count now comes from the system's own totals in one call: Windows' TCP statistics, or `/proc/net/sockstat` on Linux, where it took 2.5 ms instead of 197 ms even with only 50 connections. If only the slow way works and it takes long, it runs every 10 seconds instead of every second. On Windows the count now leaves out listening sockets.
 
 ## [1.2.14] - 2026-11-12

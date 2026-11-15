@@ -1,10 +1,15 @@
 import json
+import shutil
 import tempfile
+import threading
 import unittest
+from http.server import ThreadingHTTPServer
 from pathlib import Path
+from unittest.mock import patch
 
-from agent.hub import HubState
-from server_agent import AgentRuntime, load_config, validate_job
+from agent.hub import HubHandler, HubState
+from server_agent import (AgentRuntime, CommandCursor, HubClient, HubLoop, load_config,
+                          validate_job)
 
 
 class AgentValidationTests(unittest.TestCase):
@@ -74,6 +79,99 @@ class HubStateTests(unittest.TestCase):
             saved = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(saved["agents"][0]["agent_id"], created["agent_id"])
             self.assertEqual(saved["agents"][0]["token"], created["token"])
+
+
+class HubRestartTests(unittest.TestCase):
+    """The hub keeps commands in memory and numbers them from 1 every time it
+    starts; an agent must still take the commands sent after a restart."""
+
+    TOKEN = "agent-token-1234567890"
+    HUB = {"controller_token": "controller-token-1234567890",
+           "agents": [{"agent_id": "a1", "name": "n1", "token": TOKEN}]}
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        quiet = patch("builtins.print")
+        self.printed = quiet.start()
+        self.addCleanup(quiet.stop)
+
+    def start_hub(self):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), HubHandler)
+        server.state = HubState(self.HUB)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return server
+
+    def agent(self, server, state_path=None):
+        path = self.tmp / "agent.json"
+        path.write_text(json.dumps({
+            "hub_url": f"http://127.0.0.1:{server.server_address[1]}", "agent_id": "a1",
+            "token": self.TOKEN, "allowed_targets": [], "metrics": False}), encoding="utf-8")
+        config = load_config(path)
+        return HubLoop(config, HubClient(config, path), AgentRuntime(config),
+                       CommandCursor(state_path or self.tmp / "agent.json.state.json"))
+
+    @staticmethod
+    def targets(loop):
+        return loop.runtime.config["allowed_targets"]
+
+    @staticmethod
+    def sync(server, name):
+        return server.state.enqueue("a1", {"type": "sync_targets", "targets": [name]})
+
+    def test_commands_sent_after_a_hub_restart_are_taken(self):
+        server = self.start_hub()
+        loop = self.agent(server)
+        for name in ("t1.example", "t2.example", "t3.example"):
+            self.sync(server, name)
+        for _ in range(4):
+            loop.step()
+        self.assertEqual(self.targets(loop), ["t3.example"])
+        self.assertEqual(loop.cursor.cursor, 3)
+
+        server.state = HubState(self.HUB)           # restarted: its numbers start from 1 again
+        self.assertEqual(self.sync(server, "after.example")["seq"], 1)
+        for _ in range(3):
+            loop.step()
+        self.assertEqual(self.targets(loop), ["after.example"])
+        # It registered again, so the restarted hub knows its limits.
+        self.assertIn("limits", server.state.public_agent("a1")["metadata"])
+        # An agent restarted afterwards does not take that command again.
+        again = self.agent(server)
+        again.step()
+        self.assertEqual(self.targets(again), [])
+
+    def test_an_agent_that_does_not_know_the_epoch_still_gets_new_commands(self):
+        state = HubState(self.HUB)                  # restarted: numbers from 1 again
+        self.assertEqual(state.enqueue("a1", {"type": "stop"})["seq"], 1)
+        # An older agent asks for what comes after its number from before.
+        self.assertEqual(state.poll("a1", self.TOKEN, 7), {"seq": 8, "command": {"type": "stop"}})
+        self.assertEqual(state.enqueue("a1", {"type": "stop"})["seq"], 9)
+        self.assertEqual(state.poll("a1", self.TOKEN, 8)["seq"], 9)
+        self.assertIsNone(state.poll("a1", self.TOKEN, 9))
+        self.assertNotEqual(HubState(self.HUB).epoch, state.epoch)
+
+    def test_cursor_is_kept_across_agent_restarts(self):
+        path = self.tmp / "state.json"
+        cursor = CommandCursor(path)
+        self.assertFalse(cursor.hub_restarted("e1"))
+        self.assertTrue(cursor.advance(5))
+        self.assertFalse(cursor.advance(5))
+        again = CommandCursor(path)
+        self.assertEqual((again.cursor, again.epoch), (5, "e1"))
+        self.assertFalse(again.hub_restarted("e1"))
+        self.assertFalse(again.hub_restarted(""))   # a hub without epochs
+        self.assertTrue(again.hub_restarted("e2"))
+        self.assertEqual(CommandCursor(path).cursor, 0)
+        path.write_text('{"cursor": 3}')            # written by an older agent
+        old = CommandCursor(path)
+        self.assertFalse(old.hub_restarted("e1"))
+        self.assertEqual(old.cursor, 3)
+        for junk in ("[1, 2]", "{", '{"cursor": "x"}'):
+            path.write_text(junk)
+            self.assertEqual(CommandCursor(path).cursor, 0)
 
 
 if __name__ == "__main__":
