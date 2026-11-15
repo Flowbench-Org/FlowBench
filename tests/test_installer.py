@@ -1,3 +1,4 @@
+import errno
 import io
 import json
 import os
@@ -643,6 +644,48 @@ class SetupWindowTests(unittest.TestCase):
         self.assertTrue(wait_for(lambda: win.pages.currentWidget() is win.donePage, 10000))
         self.assertTrue((other / "FlowBench.exe").exists())
         self.assertFalse(self.target.exists())
+        win.close()
+
+    def test_a_full_disk_is_explained_in_the_interface_language(self):
+        win = SetupWindow(self.payload, self.info, target=self.target,
+                          chinese=True, platform=self.platform)
+        win.show()
+        win.startButton.click()
+        full = OSError(errno.ENOSPC, "No space left on device")
+        with mock.patch.object(core, "extract_payload", side_effect=full):
+            win.installButton.click()
+            self.assertTrue(wait_for(lambda: win.retryButton.isVisible(), 10000))
+        self.assertIn("磁盘空间不足", win.progressError.text())
+        self.assertNotIn("OSError", win.progressError.text())
+        self.assertTrue(win.changeButton.isVisible())
+        self.assertEqual(win.changeButton.text(), "更改安装位置")
+        win.set_language(False)
+        self.assertIn("not enough free space", win.progressError.text())
+        self.assertEqual(win.changeButton.text(), "Choose another folder")
+        win.close()
+
+    def test_other_extraction_errors_are_explained_too(self):
+        error = core.extract_error(self.root, OSError(errno.EIO, "Input/output error"))
+        self.assertIn("解压文件时出错", error.text(True))
+        self.assertIn("Could not extract the files", error.text(False))
+        self.assertIn("没有权限写入", core.extract_error(self.root, OSError(errno.EROFS, "ro")).text(True))
+
+    def test_short_space_asks_before_installing(self):
+        win = self.wizard()
+        win.startButton.click()
+        asked = []
+        win.ask_yes_no = lambda title, text, yes: asked.append((title, text, yes)) or False
+        with mock.patch.object(core, "free_space", return_value=1024 ** 2):
+            win.installButton.click()
+        self.assertEqual(len(asked), 1)
+        self.assertIn("1 MB free", asked[0][1])
+        self.assertEqual(asked[0][2], "Install anyway")
+        self.assertIs(win.pages.currentWidget(), win.locationPage)
+        self.assertFalse(self.target.exists())
+        win.ask_yes_no = lambda title, text, yes: True
+        with mock.patch.object(core, "free_space", return_value=1024 ** 2):
+            win.installButton.click()
+        self.assertTrue(wait_for(lambda: win.pages.currentWidget() is win.donePage, 10000))
         win.close()
 
     def test_finish_closes_without_opening_flowbench(self):

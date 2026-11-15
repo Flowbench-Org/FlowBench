@@ -406,6 +406,13 @@ class InstallerWindow(FramelessWindow):
         box.cancelButton.setText(self.t("取消", "Cancel"))
         return bool(box.exec())
 
+    def ask_yes_no(self, title: str, text: str, yes: str) -> bool:
+        """Modal prompt with ``yes`` and Cancel (tests replace this)."""
+        box = MessageBox(title, text, self)
+        box.yesButton.setText(yes)
+        box.cancelButton.setText(self.t("取消", "Cancel"))
+        return bool(box.exec())
+
     def _warn(self, title, text):
         box = MessageBox(title, text, self)
         box.cancelButton.hide()
@@ -441,6 +448,7 @@ class SetupWindow(InstallerWindow):
         self._retry_stage = True
         self._legacy = None
         self.space_low = False
+        self._space = (0, None)
         self.phase = "updating" if update else "welcome"
         self._progress = (0, "")
         self._error = None
@@ -758,6 +766,7 @@ class SetupWindow(InstallerWindow):
         self.spaceLabel.setText(text)
         self.spaceLabel.setTextColor(*(ERROR if low else SECONDARY))
         self.space_low = low
+        self._space = (need, free)
 
     # -- wizard flow ---------------------------------------------------------
 
@@ -768,6 +777,19 @@ class SetupWindow(InstallerWindow):
         except core.InstallError as exc:
             self._warn(self.t("无法安装到这里", "Cannot install here"), self._error_text(exc))
             return
+        self._refresh_space(target)
+        if self.space_low:
+            need, free = self._space
+            if not self.ask_yes_no(
+                    self.t("磁盘空间可能不够", "The drive may be too full"),
+                    self.t(f"安装需要约 {size_text(need)}，这个磁盘只剩 {size_text(free)}。"
+                           "空间不够的话，安装会中途失败。\n"
+                           "可以先清理出一些空间，或者换一个位置。仍然要安装吗？",
+                           f"Setup needs about {size_text(need)} and this drive has "
+                           f"{size_text(free)} free. Without enough space, setup stops partway.\n"
+                           "You can free some space or choose another folder. Install anyway?"),
+                    self.t("仍然安装", "Install anyway")):
+                return
         self.target = target
         self.session = SetupSession(self.payload, self.info, target,
                                     desktop_shortcut=self.desktopCheck.isChecked(),
