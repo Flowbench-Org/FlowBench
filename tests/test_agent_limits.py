@@ -297,11 +297,17 @@ class AgentPageTests(unittest.TestCase):
         self.assertEqual(agent_view.problem_text("threads", 50, 32), "线程 50（上限 32）")
         self.assertEqual(agent_view.problem_text("rate", 1e6, 100.0), "速率 1000000 QPS（上限 100）")
         self.assertEqual(agent_view.refusal_text("duration must be positive"), "时长必须大于 0")
+        self.assertEqual(agent_view.refusal_text("command time is 612 s off the agent's clock"),
+                         "命令时间和节点的时钟相差 612 秒，节点拒绝了它；请检查服务器和本机的系统时间")
+        self.assertEqual(agent_view.clock_text(-600), "服务器时钟比本机慢约 10 分钟；相差超过 5 分钟时，节点会拒绝发来的命令。")
         self.assertEqual(agent_view.limits_text(agent_limits.reported_limits(agent("a"))),
                          "上限 100 QPS · 300 秒 · 32 线程")
         settings._data["language"] = "en-US"
         self.assertEqual(agent_view.refusal_text("threads must be positive"),
                          "the thread count must be more than 0")
+        self.assertIn("about 3 min ahead", agent_view.clock_text(170))
+        for quiet in (None, "x", 30, -59, float("nan"), float("inf")):
+            self.assertEqual(agent_view.clock_text(quiet), "")
         for text in (agent_view.refusal_text("protocol is not allowed: UDP"),
                      agent_view.problem_text("rate", 500, 100.0),
                      agent_view.limits_text(agent_limits.reported_limits(agent("a")))):

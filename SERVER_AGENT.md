@@ -30,6 +30,8 @@ The generation dialog offers two control transports:
 - **Direct Hub** keeps the existing HTTPS Hub workflow. Use an existing Hub, or generate an all-in-one Hub + Agent package and expose TCP 8787.
 - **Public MQTT relay** connects the desktop controller and server Agent through `broker.hivemq.com`. The server needs outbound internet access only; no inbound control port is opened. The generated relay URL and controller token are saved back to the Server Nodes page so additional nodes can join the same private relay channel.
 
+  Each relayed command carries the desktop's time, and the Agent refuses a command more than 5 minutes off its own clock, since it could be a replay. It says so, for example `command rejected: command time is 612 s off the agent's clock`, and the Server Agents page shows the reason next to the server. Keep the clocks of both computers set automatically (NTP). The server list's tooltip warns when a server's clock is a minute or more off this computer's, and a server whose clock is off is no longer shown as offline.
+
 If you have not yet deployed a Hub, leave the "Hub address" and "control token" fields blank, then click "Generate Server Node":
 
 1. Enter a node name.

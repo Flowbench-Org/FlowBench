@@ -91,6 +91,7 @@ _REFUSALS = (
     (r"^packet_size exceeds agent limit" + _OVER, "packet_size"),
     # "asked" is the field: rate, duration, threads or packet_size
     (r"^(?P<asked>rate|duration|threads|packet_size) must be positive", "not_positive"),
+    (r"^command time is (?P<asked>\d+) s off the agent's clock", "clock"),
     (r"^protocol is not allowed: (?P<asked>\S+)", "protocol"),
     (r"^target is not in the agent allow-list: (?P<asked>\S+)", "target"),
     (r"^an authorized job is already running", "busy"),

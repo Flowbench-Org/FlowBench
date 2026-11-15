@@ -110,6 +110,25 @@ def limits_text(limits) -> str:
 FIT_LIST_MAX = 8
 
 
+def clock_text(skew) -> str:
+    """A warning when a server's clock is a minute or more off this
+    computer's (known for agents on the relay), else ""."""
+    try:
+        skew = float(skew)
+    except (TypeError, ValueError):
+        return ""
+    if not (abs(skew) >= 60 and abs(skew) < float("inf")):
+        return ""
+    minutes = max(1, round(abs(skew) / 60))
+    if skew > 0:
+        return L(f"服务器时钟比本机快约 {minutes} 分钟；相差超过 5 分钟时，节点会拒绝发来的命令。",
+                 f"The server's clock is about {minutes} min ahead of this computer's; "
+                 f"beyond 5 minutes the agent refuses commands.")
+    return L(f"服务器时钟比本机慢约 {minutes} 分钟；相差超过 5 分钟时，节点会拒绝发来的命令。",
+             f"The server's clock is about {minutes} min behind this computer's; "
+             f"beyond 5 minutes the agent refuses commands.")
+
+
 def problem_text(field, asked, allowed) -> str:
     """One thing a job asks for that an agent does not allow."""
     if field == "protocol":
@@ -131,6 +150,10 @@ def refusal_text(error) -> str:
     if found is None:
         return str(error)
     kind, asked, limit = found
+    if kind == "clock":
+        return L(f"命令时间和节点的时钟相差 {asked} 秒，节点拒绝了它；请检查服务器和本机的系统时间",
+                 f"the command's time is {asked} s off the agent's clock, so it was refused; "
+                 f"check the time on the server and on this computer")
     if kind == "not_positive":
         return {
             "rate": L("速率必须大于 0", "the rate must be more than 0"),
@@ -231,8 +254,9 @@ class AgentRow(QWidget):
         limits = agent_limits.reported_limits(agent)
         self.limits = limits_text(limits) if limits else L("未报告上限（旧版节点）",
                                                            "Limits not reported (older agent)")
-        self.setToolTip("\n".join(part for part in (self.title, self.details, platform_name, self.limits)
-                                  if part))
+        self.clock = clock_text(agent.get("clock_skew"))
+        self.setToolTip("\n".join(part for part in (self.title, self.details, platform_name, self.limits,
+                                                     self.clock) if part))
         self.setAccessibleName(f"{self.title} — {self.details} — {self.status}")
 
     def enterEvent(self, event):

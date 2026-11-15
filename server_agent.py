@@ -381,6 +381,47 @@ def metadata(config=None):
     return data
 
 
+# How far a relayed command's time may be from the agent's clock.  Older
+# commands could be replays, so they are refused.
+COMMAND_MAX_AGE = 300
+
+
+def relay_command(secret, agent_id, payload, now=None):
+    """What a relayed message asks of this agent: None to ignore it, else
+    (command_id, command, off_by).  ``off_by`` is how many seconds the
+    command's time is from this agent's clock when that is more than
+    COMMAND_MAX_AGE (the command is then refused), else None."""
+    if not verify_message(secret, payload):
+        return None
+    if payload.get("type") != "command" or str(payload.get("agent_id") or "") != agent_id:
+        return None
+    try:
+        created_at = float(payload.get("created_at") or 0)
+    except (TypeError, ValueError):
+        return None
+    command_id = str(payload.get("id") or "")
+    if not command_id or not (math.isfinite(created_at) and created_at > 0):
+        return None
+    skew = (time.time() if now is None else now) - created_at
+    return command_id, dict(payload.get("command") or {}), (skew if abs(skew) > COMMAND_MAX_AGE else None)
+
+
+def run_relay_command(runtime, command, off_by=None):
+    """Run a relayed command, or refuse one whose time is off (see
+    relay_command) where the desktop can see why: a clock that is wrong on
+    one side drops every command, which used to happen without a word."""
+    if off_by is not None:
+        message = f"command time is {int(round(abs(off_by)))} s off the agent's clock"
+        runtime._set_event({"state": "error", "error": message, "ts": time.time()})
+        print(f"[agent] command rejected: {message}", flush=True)
+        return
+    try:
+        runtime.handle(command)
+    except Exception as exc:
+        runtime._set_event({"state": "error", "error": str(exc), "ts": time.time()})
+        print(f"[agent] command rejected: {exc}", flush=True)
+
+
 def run_relay_agent(config, config_path):
     """Run an Agent over the authenticated public MQTT relay."""
     try:
@@ -450,20 +491,9 @@ def run_relay_agent(config, config_path):
             payload = json.loads(message.payload.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             return
-        if not verify_message(secret, payload):
-            return
-        if payload.get("type") != "command" or str(payload.get("agent_id") or "") != agent_id:
-            return
-        try:
-            created_at = float(payload.get("created_at") or 0)
-        except (TypeError, ValueError):
-            return
-        if abs(time.time() - created_at) > 300:
-            return
-        command_id = str(payload.get("id") or "")
-        if not command_id or command_id in processed_ids:
-            return
-        command_queue.put(payload)
+        found = relay_command(secret, agent_id, payload)
+        if found is not None and found[0] not in processed_ids:
+            command_queue.put(found)
 
     client.on_connect = on_connect
     client.on_disconnect = on_disconnect
@@ -475,17 +505,13 @@ def run_relay_agent(config, config_path):
     try:
         while True:
             try:
-                payload = command_queue.get(timeout=0.25)
+                found = command_queue.get(timeout=0.25)
             except queue.Empty:
-                payload = None
-            if payload is not None:
-                command_id = str(payload["id"])
+                found = None
+            if found is not None:
+                command_id, command, off_by = found
                 if command_id not in processed_ids:
-                    try:
-                        runtime.handle(dict(payload.get("command") or {}))
-                    except Exception as exc:
-                        runtime._set_event({"state": "error", "error": str(exc), "ts": time.time()})
-                        print(f"[agent] command rejected: {exc}", flush=True)
+                    run_relay_command(runtime, command, off_by)
                     processed_ids.add(command_id)
                     processed_order.append(command_id)
                     if len(processed_order) > 100:

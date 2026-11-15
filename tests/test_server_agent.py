@@ -8,8 +8,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from agent.hub import HubHandler, HubState
+from agent.relay import sign_message
 from server_agent import (AgentRuntime, CommandCursor, HubClient, HubLoop, load_config,
-                          validate_job)
+                          relay_command, run_relay_command, validate_job)
 
 
 class AgentValidationTests(unittest.TestCase):
@@ -204,6 +205,41 @@ class HubRestartTests(unittest.TestCase):
         for junk in ("[1, 2]", "{", '{"cursor": "x"}'):
             path.write_text(junk)
             self.assertEqual(CommandCursor(path).cursor, 0)
+
+
+class RelayCommandTests(unittest.TestCase):
+    SECRET = "controller-token-1234567890"
+
+    def command(self, created_at, agent_id="a1", **extra):
+        return sign_message(self.SECRET, dict({
+            "type": "command", "id": "c1", "agent_id": agent_id, "created_at": created_at,
+            "command": {"type": "sync_targets", "targets": ["new.example"]}}, **extra))
+
+    def test_commands_on_time_run(self):
+        found = relay_command(self.SECRET, "a1", self.command(1000.0), now=1010.0)
+        self.assertEqual(found, ("c1", {"type": "sync_targets", "targets": ["new.example"]}, None))
+        runtime = AgentRuntime({"allowed_targets": [], "allowed_protocols": ["HTTP"]})
+        run_relay_command(runtime, found[1], found[2])
+        self.assertEqual(runtime.config["allowed_targets"], ["new.example"])
+
+    def test_a_clock_that_is_off_is_reported_not_ignored(self):
+        for now, off_by in ((1000.0 + 612, 612), (1000.0 - 400, -400)):     # ahead / behind
+            with self.subTest(now=now):
+                found = relay_command(self.SECRET, "a1", self.command(1000.0), now=now)
+                self.assertEqual(found[2], off_by)
+                runtime = AgentRuntime({"allowed_targets": [], "allowed_protocols": ["HTTP"]})
+                with patch("builtins.print"):
+                    run_relay_command(runtime, found[1], found[2])
+                self.assertEqual(runtime.config["allowed_targets"], [])          # not run
+                event = runtime.current_event()
+                self.assertEqual((event["state"], event["error"]),
+                                 ("error", f"command time is {abs(off_by)} s off the agent's clock"))
+
+    def test_other_messages_are_ignored(self):
+        self.assertIsNone(relay_command(self.SECRET, "a2", self.command(1000.0), now=1000.0))
+        self.assertIsNone(relay_command("another-token-1234567890", "a1", self.command(1000.0), now=1000.0))
+        self.assertIsNone(relay_command(self.SECRET, "a1", self.command(0), now=1000.0))
+        self.assertIsNone(relay_command(self.SECRET, "a1", self.command(1000.0, type="status"), now=1000.0))
 
 
 if __name__ == "__main__":
