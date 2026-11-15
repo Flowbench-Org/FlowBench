@@ -94,7 +94,9 @@ class GuiStartupTests(unittest.TestCase):
                         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                         and node.func.id == "Analysis")
         data = next(keyword.value for keyword in analysis.keywords if keyword.arg == "datas")
-        bundled = {entry.elts[0].value for entry in data.elts}
+        # Skip any *starred spread (e.g. a conditional native-engine entry);
+        # the brand assets are always plain tuple literals.
+        bundled = {entry.elts[0].value for entry in data.elts if isinstance(entry, ast.Tuple)}
         self.assertTrue({"app.ico", "app_logo.png", "app_logo_dark.png"}.issubset(bundled))
         for filename in ("FlowBench.spec", "Agent.spec", "Hub.spec", "AgentCtl.spec"):
             with self.subTest(filename=filename):

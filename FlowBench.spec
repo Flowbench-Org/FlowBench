@@ -2,6 +2,14 @@
 # FlowBench 打包配置（onedir 模式，再由 tools/make_payload.py 和 Setup.spec 打成自带的安装程序）：
 import os
 
+# Optionally embed a prebuilt Linux native engine so generated node bundles
+# can ship it to Linux servers. Build it (cargo build --release, on Linux or
+# via cross) and leave the binary at engine/target/release/flowbench-engine,
+# or set FLOWBENCH_LINUX_ENGINE. When absent, Linux nodes run the Python
+# worker exactly as before.
+_linux_engine = os.environ.get('FLOWBENCH_LINUX_ENGINE') or 'engine/target/release/flowbench-engine'
+_engine_datas = [(_linux_engine, 'agent_template/linux')] if os.path.isfile(_linux_engine) else []
+
 # 排除环境中无关的可编辑安装包（phantom_backend 等），
 # 避免把 torch/scipy 等巨型依赖拖进 exe。
 
@@ -24,6 +32,7 @@ a = Analysis(
         ('agent/relay.py', 'agent_template/linux/agent'),
         ('agent/sysmetrics.py', 'agent_template/linux/agent'),
         ('agent/__init__.py', 'agent_template/linux/agent'),
+        *_engine_datas,
     ],
     hiddenimports=['shiboken6.Shiboken'],
     hookspath=[],

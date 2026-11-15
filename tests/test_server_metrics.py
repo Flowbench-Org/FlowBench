@@ -498,6 +498,43 @@ class NodeBundleTests(unittest.TestCase):
         with zipfile.ZipFile(out) as bundle:
             self.assertEqual(json.loads(bundle.read("linux/agent.json"))["hub_url"], "https://hub.example.com")
 
+    def _stage_engine(self, folder):
+        engine = folder / "flowbench-engine"
+        engine.write_bytes(b"\x7fELF fake flowbench engine")
+        return engine
+
+    def test_relay_bundle_ships_the_native_engine_when_staged(self):
+        view, folder = self.make_view()
+        engine = self._stage_engine(folder)
+        out = folder / "relay.zip"
+        with patch.dict(os.environ, {"FLOWBENCH_LINUX_ENGINE": str(engine)}):
+            view._generate_relay_package("node", "mqtt://broker.hivemq.com:8000/" + "r" * 20,
+                                         "controller-token-1234567890", out)
+        with zipfile.ZipFile(out) as bundle:
+            self.assertIn("linux/flowbench-engine", bundle.namelist())
+            info = bundle.getinfo("linux/flowbench-engine")
+            self.assertEqual(info.external_attr >> 16, 0o755)       # executable on Linux
+            self.assertEqual(bundle.read("linux/flowbench-engine"), engine.read_bytes())
+
+    def test_all_in_one_bundle_ships_the_native_engine_next_to_server_agent(self):
+        view, folder = self.make_view()
+        engine = self._stage_engine(folder)
+        out = folder / "all.zip"
+        with patch.dict(os.environ, {"FLOWBENCH_LINUX_ENGINE": str(engine)}):
+            view._generate_all_in_one_package("node", "203.0.113.5", 8787, out)
+        with zipfile.ZipFile(out) as bundle:
+            self.assertIn("linux/agent/flowbench-engine", bundle.namelist())
+            self.assertEqual(bundle.getinfo("linux/agent/flowbench-engine").external_attr >> 16, 0o755)
+
+    def test_bundle_omits_the_engine_when_none_is_staged(self):
+        view, folder = self.make_view()
+        out = folder / "relay.zip"
+        with patch.object(type(view), "_linux_engine_path", return_value=None):
+            view._generate_relay_package("node", "mqtt://broker.hivemq.com:8000/" + "r" * 20,
+                                         "controller-token-1234567890", out)
+        with zipfile.ZipFile(out) as bundle:
+            self.assertNotIn("linux/flowbench-engine", bundle.namelist())
+
 
 if __name__ == "__main__":
     unittest.main()

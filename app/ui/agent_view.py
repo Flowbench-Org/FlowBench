@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import os
 import re
 import secrets
 import socket
@@ -1182,6 +1183,9 @@ exec python3 agent/server_agent.py --config agent/agent.json
                 bundle.writestr("linux/hub/key.pem", key_pem)
                 for source, name in agent_sources:
                     bundle.write(source, f"linux/agent/{name}")
+                engine_bin = self._linux_engine_path(linux_root)
+                if engine_bin:
+                    self._add_executable_file(bundle, engine_bin, "linux/agent/flowbench-engine")
                 bundle.writestr("linux/agent/agent.json", config_json)
                 bundle.writestr("linux/agent/ca.pem", cert_pem)
                 bundle.writestr(
@@ -1278,6 +1282,9 @@ exec python3 agent/server_agent.py --config agent/agent.json
             bundle.writestr("windows/start-agent.cmd", start_cmd)
             for path, name in zip(source_files, LINUX_AGENT_FILES):
                 bundle.write(path, f"linux/{name}")
+            engine_bin = self._linux_engine_path(linux_root)
+            if engine_bin:
+                self._add_executable_file(bundle, engine_bin, "linux/flowbench-engine")
             bundle.writestr("linux/agent.json", config_json)
             bundle.writestr("linux/requirements.txt", "requests>=2.31\npaho-mqtt>=2.0\n")
             info = zipfile.ZipInfo("linux/start-agent.sh")
@@ -1341,6 +1348,9 @@ exec python3 agent/server_agent.py --config agent/agent.json
             for path, name in zip(source_files, LINUX_AGENT_FILES):
                 if path.is_file():
                     bundle.write(path, f"linux/{name}")
+            engine_bin = self._linux_engine_path(linux_root)
+            if engine_bin:
+                self._add_executable_file(bundle, engine_bin, "linux/flowbench-engine")
             bundle.writestr("linux/agent.json", config_json)
             bundle.writestr("linux/requirements.txt", "requests>=2.31\npaho-mqtt>=2.0\n")
             # Preserve the executable bit for Linux ZIP archives.
@@ -1385,6 +1395,32 @@ exec python3 agent/server_agent.py --config agent/agent.json
         exe = next((path for path in exe_candidates if path.is_file()), exe_candidates[0])
         linux_root = next((path for path in linux_candidates if (path / "server_agent.py").is_file()), linux_candidates[0])
         return exe, linux_root
+
+    @classmethod
+    def _linux_engine_path(cls, linux_root):
+        """Locate a prebuilt Linux native-engine binary to ship in a node
+        bundle, or ``None``. Checked in order: the FLOWBENCH_LINUX_ENGINE
+        override, the binary staged beside the Linux payload, then the cargo
+        build output. A node runs it only when its CPU/libc match; otherwise
+        the agent falls back to the Python worker."""
+        project = Path(__file__).resolve().parents[2]
+        candidates = [
+            os.environ.get("FLOWBENCH_LINUX_ENGINE") or "",
+            str(Path(linux_root) / "flowbench-engine"),
+            str(project / "engine" / "target" / "release" / "flowbench-engine"),
+        ]
+        for candidate in candidates:
+            if candidate and Path(candidate).is_file():
+                return Path(candidate)
+        return None
+
+    @staticmethod
+    def _add_executable_file(bundle, source, arcname):
+        """Add a file to the ZIP with the Linux executable bit set."""
+        info = zipfile.ZipInfo(arcname)
+        info.create_system = 3
+        info.external_attr = 0o755 << 16
+        bundle.writestr(info, Path(source).read_bytes(), compress_type=zipfile.ZIP_DEFLATED)
 
     def _selected_agent(self):
         ids = self._selected_agents_ids()

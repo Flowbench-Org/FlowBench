@@ -160,10 +160,13 @@ goes away.
 - `rust` — require the native engine; a job fails if it is missing.
 - `python` — always use the Python worker.
 
-A node bundle built with the Rust toolchain present ships the engine inside
-`FlowBench-Agent.exe`; one built without it runs the Python worker, and both look
-the same to the desktop. Set `engine_path` to the binary, or the `FLOWBENCH_ENGINE`
-environment variable, to point at it explicitly.
+The Windows node package bundles the engine inside `FlowBench-Agent.exe` when the
+build host has the Rust toolchain (`build_engine.ps1`). For Linux nodes, build the
+binary on Linux with `build_engine.sh` before building the desktop app: it is then
+embedded by `FlowBench.spec` and shipped in every generated Linux node bundle beside
+`server_agent.py`. A node whose CPU/libc do not match falls back to the Python worker,
+so a missing or mismatched binary is never fatal. `engine_path` or the `FLOWBENCH_ENGINE`
+environment variable point at the binary explicitly; see [`ENGINE.md`](ENGINE.md).
 
 ### System metrics
 

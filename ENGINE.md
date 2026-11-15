@@ -77,3 +77,21 @@ of this contract; the bridge refuses an engine whose number it does not know.
 The binary is located, in order: `FLOWBENCH_ENGINE` env var, the `engine_path`
 config key, next to the agent executable, the PyInstaller bundle dir, then
 `engine/target/release/` in a source checkout.
+
+## Shipping the engine to nodes
+
+The engine is a compiled binary, so it is per-OS/arch:
+
+- **Windows nodes** — build with `build_engine.ps1` (needs the Rust toolchain).
+  `build_agent.ps1` runs it when `cargo` is present and bundles the binary inside
+  `FlowBench-Agent.exe`, so the generated Windows node package already has it.
+- **Linux nodes** — build with `build_engine.sh` on a Linux machine (or
+  cross-compile) *before* building the FlowBench desktop app. The binary at
+  `engine/target/release/flowbench-engine` is embedded by `FlowBench.spec`
+  (`agent_template/linux`), and the node-bundle generator ships it beside
+  `server_agent.py` in every generated Linux bundle. Set `FLOWBENCH_LINUX_ENGINE`
+  to override the path.
+
+A node whose CPU/libc do not match the binary simply falls back to the Python
+worker (in the default `auto` mode), so a mismatched or missing binary is never
+fatal. Build the Linux binary on the oldest glibc you need to support.
