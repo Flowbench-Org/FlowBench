@@ -167,9 +167,10 @@ def load_config(path: Path):
             if isinstance(value, bool):
                 raise TypeError
             number = kind(value)
+            usable = math.isfinite(number) and number > 0   # a huge int overflows here
         except (TypeError, ValueError, OverflowError) as exc:
             raise ValueError(f"{key} must be a positive number") from exc
-        if not (math.isfinite(number) and number > 0):
+        if not usable:
             raise ValueError(f"{key} must be a positive number")
         merged[key] = number
     merged["metrics"] = merged.get("metrics", True) is not False

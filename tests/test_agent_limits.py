@@ -84,11 +84,13 @@ class AgentSideTests(unittest.TestCase):
         self.assertEqual(message["metadata"]["limits"]["max_threads"], 3)
 
     def test_bad_limits_stop_the_agent_at_start(self):
-        for value in (0, -5, "abc", True, None, "NaN"):
+        for value in (0, -5, "abc", True, None, "NaN", 10 ** 400):
             with self.subTest(value=value), self.assertRaisesRegex(ValueError, "max_rate must be a positive"):
                 self.config(max_rate=value)
         with self.assertRaisesRegex(ValueError, "max_threads must be a positive"):
             self.config(max_threads=0)
+        with self.assertRaisesRegex(ValueError, "max_duration must be a positive"):
+            self.config(max_duration=10 ** 400)
         self.assertEqual(self.config(max_duration="600")["max_duration"], 600)
 
     def test_refusals_say_by_how_much(self):
@@ -117,9 +119,12 @@ class LimitLogicTests(unittest.TestCase):
         self.assertEqual(agent_limits.reported_limits(agent("a", rate=50))["max_rate"], 50.0)
         self.assertIsNone(agent_limits.reported_limits(agent("a", limits=False)))     # older agent
         self.assertIsNone(agent_limits.reported_limits({"metadata": None}))
-        for bad in (0, -1, "x", True, float("inf")):
+        for bad in (0, -1, "x", True, float("inf"), 10 ** 400):
             with self.subTest(bad=bad):
                 self.assertIsNone(agent_limits.reported_limits(agent("a", rate=bad)))
+        huge = agent("a")
+        huge["metadata"]["limits"]["max_threads"] = 10 ** 400
+        self.assertIsNone(agent_limits.reported_limits(huge))
 
     def test_problems_and_fit(self):
         limits = agent_limits.reported_limits(agent("a"))

@@ -38,9 +38,10 @@ def reported_limits(agent) -> Optional[dict]:
             return None
         try:
             number = kind(value)
+            usable = math.isfinite(number) and number > 0   # a huge int overflows here
         except (TypeError, ValueError, OverflowError):
             return None
-        if not (math.isfinite(number) and number > 0):
+        if not usable:
             return None
         limits[key] = number
     protocols = raw.get("protocols")
