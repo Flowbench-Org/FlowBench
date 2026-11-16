@@ -1,0 +1,2 @@
+# Prebuilt engine binaries: never convert line endings.
+engine/prebuilt/*/flowbench-engine binary

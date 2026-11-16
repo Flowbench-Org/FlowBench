@@ -3,13 +3,17 @@
 import os
 import sys
 
-# Optionally embed a prebuilt Linux native engine so generated node bundles
-# can ship it to Linux servers. Build it (cargo build --release, on Linux or
-# via cross) and leave the binary at engine/target/release/flowbench-engine,
-# or set FLOWBENCH_LINUX_ENGINE. When absent, Linux nodes run the Python
-# worker exactly as before.
-_linux_engine = os.environ.get('FLOWBENCH_LINUX_ENGINE') or 'engine/target/release/flowbench-engine'
-_engine_datas = [(_linux_engine, 'agent_template/linux')] if os.path.isfile(_linux_engine) else []
+# Embed a Linux native engine so generated node bundles ship it to Linux
+# servers. First found wins: FLOWBENCH_LINUX_ENGINE, a fresh build from
+# build_engine.sh (engine/target/release/flowbench-engine), then the committed
+# glibc-2.17 build in engine/prebuilt (see its README). A node that cannot run
+# it falls back to the Python worker.
+_linux_engine = next((path for path in (
+    os.environ.get('FLOWBENCH_LINUX_ENGINE') or '',
+    'engine/target/release/flowbench-engine',
+    'engine/prebuilt/linux-x86_64/flowbench-engine',
+) if path and os.path.isfile(path)), '')
+_engine_datas = [(_linux_engine, 'agent_template/linux')] if _linux_engine else []
 
 # Bundle the native engine beside the desktop app for its own local stress
 # runs (HTTP/HTTPS/TCP). Staged by build_engine.ps1 (repo root) or build_engine.sh

@@ -119,12 +119,15 @@ The engine is a compiled binary, so it is per-OS/arch:
 - **Windows nodes** — build with `build_engine.ps1` (needs the Rust toolchain).
   `build_agent.ps1` runs it when `cargo` is present and bundles the binary inside
   `FlowBench-Agent.exe`, so the generated Windows node package already has it.
-- **Linux nodes** — build with `build_engine.sh` on a Linux machine (or
-  cross-compile) *before* building the FlowBench desktop app. The binary at
-  `engine/target/release/flowbench-engine` is embedded by `FlowBench.spec`
-  (`agent_template/linux`), and the node-bundle generator ships it beside
-  `server_agent.py` in every generated Linux bundle. Set `FLOWBENCH_LINUX_ENGINE`
-  to override the path.
+- **Linux nodes** — the repo carries an x86-64 build against glibc 2.17
+  (`engine/prebuilt/linux-x86_64/flowbench-engine`, see its README), so building
+  the desktop app on Windows already ships it. `FlowBench.spec` embeds it under
+  `agent_template/linux`, and the node-bundle generator puts it beside
+  `server_agent.py` in every generated Linux bundle. A fresh build from
+  `build_engine.sh` (`engine/target/release/flowbench-engine`) takes precedence,
+  and `FLOWBENCH_LINUX_ENGINE` overrides both. `tests/test_engine_prebuilt.py`
+  fails when the engine sources change without the prebuilt binary being
+  rebuilt.
 
 `build_engine.ps1` / `build_engine.sh` always build into `engine/target` (whatever
 `CARGO_TARGET_DIR` says) and delete the previous binary first, so a failed build
