@@ -2,6 +2,8 @@
 name = "flowbench-engine"
 version = "0.1.0"
 edition = "2021"
+# io::ErrorKind::HostUnreachable / NetworkUnreachable / NetworkDown
+rust-version = "1.83"
 description = "FlowBench native load-generation engine (stdin/stdout JSON protocol)"
 license = "LicenseRef-Proprietary"
 publish = false

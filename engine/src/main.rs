@@ -24,6 +24,15 @@ use tokio::time::Instant;
 /// Bumped when the stdin/stdout contract changes in a breaking way.
 const PROTOCOL: u32 = 1;
 
+/// The User-Agent the engine sends (and counts in `bytes_tx`).
+const USER_AGENT: &str = "FlowBench-Engine";
+
+/// Once the test window ends (deadline or stop), in-flight requests get at
+/// most this long to finish; the rest are cancelled. Without a cap a stop
+/// waited out a slow target's whole timeout (up to 60 s), while the Python
+/// engines give up after about 1.5-2.5 s.
+const DRAIN_GRACE: Duration = Duration::from_millis(2000);
+
 // ---------------------------------------------------------------------------
 // Wire protocol
 // ---------------------------------------------------------------------------
@@ -215,10 +224,13 @@ impl RateLimiter {
     fn new(rate: f64) -> Self {
         let rate = rate.max(0.1);
         let capacity = rate.max(1.0);
+        // Start with one token, not a full bucket: a full bucket let the first
+        // second send the configured rate *plus* a whole burst, i.e. up to
+        // twice the rate the job was authorized for.
         RateLimiter {
             rate,
             capacity,
-            state: Mutex::new((capacity, Instant::now())),
+            state: Mutex::new((capacity.min(1.0), Instant::now())),
         }
     }
 
@@ -263,6 +275,8 @@ fn classify_text(text: &str) -> String {
         ("lookup", "dns"),
         ("certificate", "cert"),
         ("tls", "tls"),
+        ("handshake", "tls"),
+        ("alert", "tls"),
         ("ssl", "tls"),
         ("closed", "closed"),
     ] {
@@ -274,27 +288,47 @@ fn classify_text(text: &str) -> String {
 }
 
 fn error_chain(err: &reqwest::Error) -> String {
-    let mut text = err.to_string();
+    // reqwest's own message embeds the URL, whose words ("/timeout",
+    // "reset.example.com") must not decide the class, so leave it out.
+    let mut parts = Vec::new();
     let mut source = err.source();
     while let Some(cause) = source {
-        text.push_str("; ");
-        text.push_str(&cause.to_string());
+        parts.push(cause.to_string());
         source = cause.source();
     }
-    text
+    if parts.is_empty() {
+        let mut text = err.to_string();
+        if let Some(url) = err.url() {
+            text = text.replace(url.as_str(), "");
+        }
+        parts.push(text);
+    }
+    parts.join("; ")
 }
 
-fn classify_io(err: &std::io::Error) -> String {
+/// The class of an OS-level I/O error from its kind alone (locale-independent).
+fn io_kind_code(err: &std::io::Error) -> Option<&'static str> {
     use std::io::ErrorKind;
-    match err.kind() {
+    Some(match err.kind() {
         ErrorKind::TimedOut => "timeout",
         ErrorKind::ConnectionRefused => "refused",
         ErrorKind::ConnectionReset => "reset",
-        ErrorKind::ConnectionAborted => "closed",
+        // UnexpectedEof: the peer closed before the response was complete
+        // (e.g. a body shorter than its Content-Length).
+        ErrorKind::ConnectionAborted | ErrorKind::UnexpectedEof => "closed",
+        ErrorKind::HostUnreachable | ErrorKind::NetworkUnreachable | ErrorKind::NetworkDown => {
+            "unreachable"
+        }
         ErrorKind::AddrNotAvailable | ErrorKind::AddrInUse => "addr",
-        _ => return classify_text(&err.to_string()),
+        _ => return None,
+    })
+}
+
+fn classify_io(err: &std::io::Error) -> String {
+    match io_kind_code(err) {
+        Some(code) => code.to_string(),
+        None => classify_text(&err.to_string()),
     }
-    .to_string()
 }
 
 fn classify_reqwest(err: &reqwest::Error) -> String {
@@ -306,44 +340,91 @@ fn classify_reqwest(err: &reqwest::Error) -> String {
         Some(err as &(dyn std::error::Error + 'static));
     while let Some(cause) = source {
         if let Some(io) = cause.downcast_ref::<std::io::Error>() {
-            return classify_io(io);
+            if let Some(code) = io_kind_code(io) {
+                return code.to_string();
+            }
+            break;
         }
         source = cause.source();
     }
+    // Otherwise match the whole chain: hyper/reqwest add English context
+    // ("dns error", "tcp connect error", TLS alerts) even where the OS
+    // message itself is localized, as on Chinese Windows.
     classify_text(&error_chain(err))
 }
 
-fn estimate_http_bytes(cfg: &JobConfig) -> u64 {
-    let mut total = 3 + cfg.url.len() + 12; // "GET" + url + request-line overhead
-    if let Some(headers) = &cfg.headers {
+/// Bytes one GET puts on the wire (HTTP/1.1, no body): the request line, the
+/// Host, user-agent and accept headers reqwest adds unless the job overrides
+/// them, the job's own headers and the blank line. TLS overhead is not
+/// counted, as in the Python engines. Computed once per job.
+fn http_request_bytes(cfg: &JobConfig) -> u64 {
+    let Ok(url) = reqwest::Url::parse(&cfg.url) else {
+        return 0;
+    };
+    let custom = cfg.headers.as_ref();
+    let has = |name: &str| custom.is_some_and(|h| h.keys().any(|k| k.eq_ignore_ascii_case(name)));
+    let line = |name: &str, value_len: usize| name.len() + 2 + value_len + 2; // "name: value\r\n"
+    let request_target = url.path().len() + url.query().map_or(0, |q| q.len() + 1);
+    let mut total = "GET ".len() + request_target + " HTTP/1.1\r\n".len();
+    if !has("host") {
+        let port = url.port().map_or(0, |p| p.to_string().len() + 1);
+        total += line("host", url.host_str().unwrap_or("").len() + port);
+    }
+    if !has("user-agent") {
+        total += line("user-agent", USER_AGENT.len());
+    }
+    if !has("accept") {
+        total += line("accept", "*/*".len());
+    }
+    // reqwest turns URL credentials into a Basic authorization header.
+    if !url.username().is_empty() || url.password().is_some() {
+        let decoded = |s: &str| s.len() - 2 * s.matches('%').count();
+        let n = decoded(url.username()) + 1 + url.password().map_or(0, decoded);
+        total += line("authorization", "Basic ".len() + n.div_ceil(3) * 4);
+    }
+    if let Some(headers) = custom {
         for (k, v) in headers {
-            total += k.len() + v.len() + 4;
+            total += line(k, v.len());
         }
     }
-    total as u64
+    (total + 2) as u64 // the blank line that ends the request head
 }
 
-async fn do_request(client: &reqwest::Client, cfg: &JobConfig) -> (bool, Option<String>, u64) {
+async fn do_request(
+    client: &reqwest::Client,
+    cfg: &JobConfig,
+    http_bytes: u64,
+) -> (bool, Option<String>, u64) {
     match cfg.protocol.as_str() {
         "HTTP" | "HTTPS" => {
-            let mut builder = client
-                .get(cfg.url.as_str())
-                .timeout(Duration::from_millis(cfg.timeout));
+            // The timeouts are the client's connect + per-read timeouts (like
+            // requests' timeout=t), so a response that keeps arriving is not
+            // cut off at t, and one that stalls fails.
+            let mut builder = client.get(cfg.url.as_str());
             if let Some(headers) = &cfg.headers {
                 for (k, v) in headers {
                     builder = builder.header(k.as_str(), v.as_str());
                 }
             }
-            match builder.send().await {
-                Ok(resp) => {
-                    let status = resp.status().as_u16();
-                    let ok = status < 400;
-                    let sent = estimate_http_bytes(cfg);
-                    let _ = resp.bytes().await; // drain so the socket can be reused
-                    let err = if ok { None } else { Some(format!("HTTP {status}")) };
-                    (ok, err, sent)
+            let mut resp = match builder.send().await {
+                Ok(resp) => resp,
+                Err(e) => return (false, Some(classify_reqwest(&e)), 0),
+            };
+            let status = resp.status().as_u16();
+            // Read the whole body, as requests does, but chunk by chunk so a
+            // large response never sits in memory. A truncated, reset or
+            // stalled body is a failed request whatever the status line said.
+            loop {
+                match resp.chunk().await {
+                    Ok(Some(_)) => {}
+                    Ok(None) => break,
+                    Err(e) => return (false, Some(classify_reqwest(&e)), 0),
                 }
-                Err(e) => (false, Some(classify_reqwest(&e)), 0),
+            }
+            if status < 400 {
+                (true, None, http_bytes)
+            } else {
+                (false, Some(format!("HTTP {status}")), http_bytes)
             }
         }
         "TCP" => {
@@ -370,8 +451,13 @@ async fn do_request(client: &reqwest::Client, cfg: &JobConfig) -> (bool, Option<
                 Err(_) => return (false, Some("timeout".to_string()), 0),
             }
             let mut buf = [0u8; 1];
-            let _ = tokio::time::timeout(timeout, stream.read(&mut buf)).await;
-            (true, None, sent)
+            match tokio::time::timeout(timeout, stream.read(&mut buf)).await {
+                // A reset (or any error) after the send is a failure, as
+                // Python's recv() raises; a reply, EOF or no reply in time all
+                // count as sent.
+                Ok(Err(e)) => (false, Some(classify_io(&e)), 0),
+                _ => (true, None, sent),
+            }
         }
         _ => (false, Some("unsupported protocol".to_string()), 0),
     }
@@ -435,12 +521,21 @@ async fn run_job(cfg: JobConfig, stop: Arc<AtomicBool>, out: Out) {
     let threads = cfg.threads.max(1);
     let duration = cfg.duration.max(0.0);
 
+    let timeout = Duration::from_millis(cfg.timeout.max(1));
     let client = match reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
         .no_proxy() // never route load through an env/system proxy
         .redirect(reqwest::redirect::Policy::none()) // stay on the authorized host
         .pool_max_idle_per_host(threads as usize)
-        .user_agent("FlowBench-Engine")
+        .user_agent(USER_AGENT)
+        // requests' timeout=t: a connect timeout plus a per-read timeout,
+        // not a cap on the whole exchange.
+        .connect_timeout(timeout)
+        .read_timeout(timeout)
+        // As lenient as Python's http.client with sloppy response headers.
+        .http1_ignore_invalid_headers_in_responses(true)
+        .http1_allow_spaces_after_header_name_in_responses(true)
+        .http1_allow_obsolete_multiline_headers_in_responses(true)
         .build()
     {
         Ok(client) => client,
@@ -477,39 +572,64 @@ async fn run_job(cfg: JobConfig, stop: Arc<AtomicBool>, out: Out) {
     };
 
     // Dispatch loop: one token, one permit, one request task.
+    let http_bytes = http_request_bytes(&cfg);
     let cfg = Arc::new(cfg);
+    // Flipped once the drain grace is over; cancels requests still in flight.
+    let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
     while !stop.load(Ordering::Relaxed) && Instant::now() < deadline {
         if !limiter.acquire(&stop, deadline).await {
             break;
         }
-        let permit = match tokio::time::timeout_at(deadline, sem.clone().acquire_owned()).await {
-            Ok(Ok(permit)) => permit,
-            _ => break, // deadline reached or semaphore closed
+        // Wait for a free slot, re-checking stop: when every slot is busy on a
+        // slow target, a stop must not wait for an in-flight request to end.
+        let permit = loop {
+            let wake = (Instant::now() + Duration::from_millis(100)).min(deadline);
+            match tokio::time::timeout_at(wake, sem.clone().acquire_owned()).await {
+                Ok(Ok(permit)) => break Some(permit),
+                Ok(Err(_)) => break None, // semaphore closed
+                Err(_) if stop.load(Ordering::Relaxed) || Instant::now() >= deadline => break None,
+                Err(_) => {}
+            }
         };
+        let Some(permit) = permit else { break };
         if stop.load(Ordering::Relaxed) {
             break;
         }
         let stats = stats.clone();
         let cfg = cfg.clone();
         let client = client.clone();
+        let mut cancel = cancel_rx.clone();
         tokio::spawn(async move {
             let started = Instant::now();
-            let (ok, err, sent) = do_request(&client, &cfg).await;
-            let elapsed = started.elapsed().as_secs_f64() * 1000.0;
-            stats.record(ok, err, sent, elapsed).await;
+            tokio::select! {
+                (ok, err, sent) = do_request(&client, &cfg, http_bytes) => {
+                    let elapsed = started.elapsed().as_secs_f64() * 1000.0;
+                    stats.record(ok, err, sent, elapsed).await;
+                }
+                // Past the drain grace the request is dropped uncounted, like
+                // a Python worker the engine stops waiting for. (The flag only
+                // ever flips false -> true, so any change means cancel.)
+                _ = cancel.changed() => {}
+            }
             drop(permit);
         });
     }
 
-    // The test window ends here; time spent draining in-flight requests is
-    // not test time (matches the Python engine).
+    // The test window ends here (a stop is seen within ~100 ms); time spent
+    // draining in-flight requests is not test time (matches the Python engines).
     let ended = Instant::now().min(deadline);
     stop.store(true, Ordering::Relaxed);
     snap.abort();
 
-    // Drain in-flight requests (bounded by the per-request timeout).
-    let grace = Duration::from_millis(cfg.timeout + 2000);
-    let _ = tokio::time::timeout(grace, sem.acquire_many(threads)).await;
+    // In-flight requests get a short grace to finish (and count), then the
+    // rest are cancelled. Waiting for every permit afterwards means no task is
+    // still recording while the report is read.
+    let grace = Duration::from_millis(cfg.timeout.saturating_add(500)).min(DRAIN_GRACE);
+    if tokio::time::timeout(grace, sem.acquire_many(threads)).await.is_err() {
+        let _ = cancel_tx.send(true);
+        let _ = tokio::time::timeout(Duration::from_millis(500), sem.acquire_many(threads)).await;
+    }
+    drop(cancel_rx);
 
     // Final report.
     let elapsed = ended.duration_since(t0).as_secs_f64();
