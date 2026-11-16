@@ -67,6 +67,14 @@ Prerequisite: first deploy and start `FlowBench-Hub`, and the local GUI must be 
 
 The generated ZIP already includes the node‑specific token, Hub address, Windows executable, and Linux source code; no need to manually edit `agent.json`. The target whitelist can be empty at initial generation; before each task is started from the GUI, the control side will synchronise the targets already authorised locally.
 
+### Delete or restore a server in the desktop list
+
+On **Server Agents**, open **Select servers…**, click the red **Delete** button on the right of the server's row, and confirm. For batch removal, check the servers and click the red **Delete** button in the toolbar after **Select all** and **Clear**. The toolbar button deletes every checked server, including checks kept under a different search that are currently hidden; the confirmation lists the affected servers. **Select all** and **Clear** apply to the current search results. Deleted servers are removed from this computer's server and Monitor lists and stay removed after refresh or restart. This works with both direct Hubs and MQTT relays. Removal is saved separately for each control URL and controller token, so other connections and computers keep their own lists.
+
+To add a server back, connect with the same URL and token, open **Select servers…**, and click **Restore deleted…** to the right of the toolbar's red **Delete** button. Select the servers to restore and click **Restore selected**. This panel can still be opened after every server has been deleted. The list refreshes through the current control channel. If the channel is unavailable, restore remains saved and the server appears when a later refresh can find it.
+
+Deleting a list entry does not stop its current job, uninstall its Agent, delete server files, or revoke Hub/relay credentials. Stop a running job with **Stop server job** before deleting the entry if needed. To retire the actual server node, stop the Agent on that server separately.
+
 ## 1. Generate random tokens
 
 Generate tokens in PowerShell:

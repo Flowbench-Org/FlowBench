@@ -31,11 +31,12 @@ from qfluentwidgets import (BodyLabel, CaptionLabel, CheckBox, ComboBox, Compact
                             InfoBarPosition, LineEdit, PasswordLineEdit,
                             PrimaryPushButton, PushButton, ScrollArea, SearchLineEdit,
                             SimpleCardWidget, StrongBodyLabel, SubtitleLabel,
-                            getFont, isDarkTheme, themeColor, Theme)
+                            getFont, isDarkTheme, setCustomStyleSheet, themeColor, Theme)
 
 from agent.transport import number_text
 from app.services import agent_limits
 from app.services.agent_control import ControllerClient, RelayControllerClient
+from app.services.agent_registry import AgentRegistry
 from app.services.remote_monitor import remote_monitor
 from app.services.auth import add_authorized, build_http_url, is_authorized, normalize_host
 from app.services.settings import settings
@@ -220,12 +221,35 @@ def _paint_os_badge(painter, rect, os_name):
     painter.restore()
 
 
+def _style_delete_button(button, *, framed=False):
+    button.setObjectName("agentDeleteButton")
+    button.setAutoDefault(False)
+    if framed:
+        # Keep the standard Fluent button surface, border and interaction states.
+        setCustomStyleSheet(button,
+            "PushButton#agentDeleteButton { color: #C42B1C; }"
+            "PushButton#agentDeleteButton:disabled { color: rgba(196,43,28,90); }",
+            "PushButton#agentDeleteButton { color: #FF99A4; }"
+            "PushButton#agentDeleteButton:disabled { color: rgba(255,153,164,90); }")
+        return
+    setCustomStyleSheet(button,
+        "PushButton#agentDeleteButton { color: #C42B1C; background: transparent; border: none; }"
+        "PushButton#agentDeleteButton:hover { background: rgba(196,43,28,20); }"
+        "PushButton#agentDeleteButton:pressed { background: rgba(196,43,28,36); }"
+        "PushButton#agentDeleteButton:disabled { color: rgba(196,43,28,90); }",
+        "PushButton#agentDeleteButton { color: #FF99A4; background: transparent; border: none; }"
+        "PushButton#agentDeleteButton:hover { background: rgba(255,153,164,24); }"
+        "PushButton#agentDeleteButton:pressed { background: rgba(255,153,164,40); }"
+        "PushButton#agentDeleteButton:disabled { color: rgba(255,153,164,90); }")
+
+
 class AgentRow(QWidget):
     """One selectable server: checkbox, OS badge, name, details and online pill."""
 
     HEIGHT = 60
+    delete_requested = Signal(str)
 
-    def __init__(self, agent, check, parent=None):
+    def __init__(self, agent, check, parent=None, *, removed=False, deletable=False):
         super().__init__(parent)
         self.agent = agent
         self.check = check
@@ -244,6 +268,22 @@ class AgentRow(QWidget):
         layout.addStretch(1)
         check.stateChanged.connect(self.update)
 
+        self._removed = removed
+        self.deleteBtn = None
+        self.update_agent(agent)
+        agent_id = str(agent.get("agent_id") or "")
+        if deletable and not removed:
+            self.deleteBtn = PushButton(L("删除", "Delete"), self)
+            self.deleteBtn.setFixedSize(max(60, self.deleteBtn.sizeHint().width()), 28)
+            self.deleteBtn.setAccessibleName(f"{L('删除', 'Delete')} {self.title}")
+            _style_delete_button(self.deleteBtn)
+            layout.addWidget(self.deleteBtn, 0, Qt.AlignmentFlag.AlignVCenter)
+            self.deleteBtn.clicked.connect(lambda: self.delete_requested.emit(agent_id))
+
+    def update_agent(self, agent):
+        """Refresh the row without replacing its checkbox or pending selection."""
+        self.agent = agent
+        self.os_name = agent_os(agent)
         agent_id = str(agent.get("agent_id") or "")
         metadata = _as_dict(agent.get("metadata"))
         hostname = str(metadata.get("hostname") or "").strip()
@@ -257,9 +297,17 @@ class AgentRow(QWidget):
         self.limits = limits_text(limits) if limits else L("未报告上限（旧版节点）",
                                                            "Limits not reported (older agent)")
         self.clock = clock_text(agent.get("clock_skew"))
+        if self._removed:
+            self.details = agent_id
+            self.online = False
+            self.status = L("已删除", "deleted")
+            platform_name = self.limits = self.clock = ""
         self.setToolTip("\n".join(part for part in (self.title, self.details, platform_name, self.limits,
                                                      self.clock) if part))
         self.setAccessibleName(f"{self.title} — {self.details} — {self.status}")
+        if self.deleteBtn is not None:
+            self.deleteBtn.setAccessibleName(f"{L('删除', 'Delete')} {self.title}")
+        self.update()
 
     def enterEvent(self, event):
         self._hover = True
@@ -321,7 +369,8 @@ class AgentRow(QWidget):
         pill_font = getFont(12)
         pill_metrics = QFontMetrics(pill_font)
         pill_width = 26 + pill_metrics.horizontalAdvance(self.status)
-        pill = QRectF(self.width() - 14 - pill_width, (self.HEIGHT - 22) / 2, pill_width, 22)
+        right = self.deleteBtn.geometry().left() - 8 if self.deleteBtn else self.width() - 14
+        pill = QRectF(right - pill_width, (self.HEIGHT - 22) / 2, pill_width, 22)
         pill_fill, pill_text, dot = self._pill_colors(dark)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(pill_fill)
@@ -352,21 +401,34 @@ class AgentRow(QWidget):
 class AgentSelectionDialog(MessageBoxBase):
     """Dialog for searching and selecting server agents for one operation."""
 
-    def __init__(self, agents, selected_ids=None, parent=None):
+    def __init__(self, agents, selected_ids=None, parent=None, *, restoring=False,
+                 delete_agent=None, delete_agents=None, restore_agents=None, removed_count=0):
         super().__init__(parent)
-        self.setWindowTitle(L("选择服务器节点", "Select Server Agents"))
+        self._delete_agent_callback = delete_agent
+        self._delete_agents_callback = delete_agents
+        self._restore_agents_callback = restore_agents
+        self._restoring = restoring
+        self.setWindowTitle(L("恢复已删除服务器", "Restore deleted servers") if restoring
+                            else L("选择服务器节点", "Select Server Agents"))
         self.widget.setMinimumWidth(600)
         FluentStyleSheet.DIALOG.apply(self, Theme.DARK if isDarkTheme() else Theme.LIGHT)
         self.setMaskColor(QColor(0, 0, 0, 120) if isDarkTheme() else QColor(0, 0, 0, 76))
-        self.yesButton.setText(L("应用选择", "Apply selection"))
+        self.yesButton.setText(L("恢复所选", "Restore selected") if restoring
+                               else L("应用选择", "Apply selection"))
         self.cancelButton.setText(L("取消", "Cancel"))
 
-        self.viewLayout.addWidget(StrongBodyLabel(
-            L("选择要执行任务的服务器", "Choose servers for this task"), self.widget))
-        self.viewLayout.addWidget(CaptionLabel(
+        self.headingLabel = StrongBodyLabel(
+            L("选择要恢复的服务器", "Choose servers to restore") if restoring
+            else L("选择要执行任务的服务器", "Choose servers for this task"), self.widget)
+        self.viewLayout.addWidget(self.headingLabel)
+        self.descriptionLabel = CaptionLabel(
+            L("恢复后会刷新当前控制通道；节点仍在运行且连接可用时，将重新出现在列表中。",
+              "After restoring, the current control channel is refreshed. Running, reachable agents reappear in the list.")
+            if restoring else
             L("可以选择一个、多个或全部服务器。离线节点也可以保留在队列中，待上线后执行。",
-              "Select one, several, or all servers. Offline nodes can stay queued and run when they come online."),
-            self.widget))
+              "Select one, several, or all servers. Offline nodes can stay queued and run when they come online."), self.widget)
+        self.descriptionLabel.setWordWrap(True)
+        self.viewLayout.addWidget(self.descriptionLabel)
 
         self.searchEdit = SearchLineEdit(self.widget)
         self.searchEdit.setPlaceholderText(L("搜索名称、ID、主机名或状态（如 hk 在线）",
@@ -386,6 +448,18 @@ class AgentSelectionDialog(MessageBoxBase):
         self.clearBtn.clicked.connect(lambda: self._set_all(False))
         actions.addWidget(self.selectAllBtn)
         actions.addWidget(self.clearBtn)
+        self.deleteAgentsBtn = None
+        if delete_agents is not None and not restoring:
+            self.deleteAgentsBtn = PushButton(L("删除", "Delete"), self.widget)
+            _style_delete_button(self.deleteAgentsBtn, framed=True)
+            self.deleteAgentsBtn.clicked.connect(self._delete_selected)
+            actions.addWidget(self.deleteAgentsBtn)
+        self.restoreAgentsBtn = None
+        if restore_agents is not None and not restoring:
+            self.restoreAgentsBtn = PushButton(L("恢复已删除…", "Restore deleted…"), self.widget)
+            self.restoreAgentsBtn.setEnabled(removed_count > 0)
+            self.restoreAgentsBtn.clicked.connect(self._restore_agents)
+            actions.addWidget(self.restoreAgentsBtn)
         actions.addStretch(1)
         actions.addWidget(self.selectedCount)
         self.viewLayout.addLayout(actions)
@@ -397,6 +471,8 @@ class AgentSelectionDialog(MessageBoxBase):
         content.setObjectName("agentSelectionList")
         content.setStyleSheet("#agentSelectionList { background: transparent; }")
         content_layout = QVBoxLayout(content)
+        self._list_content = content
+        self._list_layout = content_layout
         # Right margin leaves room for Fluent's overlay scrollbar beside the cards.
         content_layout.setContentsMargins(0, 2, 12, 2)
         content_layout.setSpacing(6)
@@ -407,20 +483,17 @@ class AgentSelectionDialog(MessageBoxBase):
             check = CheckBox("", content)
             check.setChecked(agent_id in selected)
             check.stateChanged.connect(self._update_count)
-            row = AgentRow(agent, check, content)
+            row = AgentRow(agent, check, content, removed=restoring,
+                           deletable=delete_agent is not None)
+            row.delete_requested.connect(self._delete_agent)
             self._checks[agent_id] = check
             self._rows[agent_id] = row
             content_layout.addWidget(row)
-        if not self._checks:
-            empty = CaptionLabel(L("请先刷新服务器节点列表", "Refresh the server list first"), content)
-            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            empty.setMinimumHeight(AgentRow.HEIGHT)
-            content_layout.addWidget(empty)
-            self.searchEdit.setEnabled(False)
         self.noMatchLabel = CaptionLabel(L("没有匹配的服务器", "No matching servers"), content)
         self.noMatchLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.noMatchLabel.setMinimumHeight(AgentRow.HEIGHT)
-        self.noMatchLabel.hide()
+        self.noMatchLabel.setHidden(bool(self._rows) or restore_agents is None)
+        self.searchEdit.setEnabled(bool(self._rows))
         content_layout.addWidget(self.noMatchLabel)
         content_layout.addStretch(1)
         # Show up to five rows; longer lists scroll inside this area.
@@ -441,8 +514,64 @@ class AgentSelectionDialog(MessageBoxBase):
             match = agent_matches(row.agent, query)
             row.setHidden(not match)
             visible += match
-        self.noMatchLabel.setHidden(not self._rows or visible > 0)
+        self.noMatchLabel.setHidden(visible > 0)
         self._update_count()
+
+    def _delete_agent(self, agent_id):
+        if self._delete_agent_callback is None or not self._delete_agent_callback(agent_id):
+            return
+        self._forget_rows([agent_id])
+
+    def _delete_selected(self):
+        selected = self.selected_ids()
+        if (not selected or self._delete_agents_callback is None
+                or not self._delete_agents_callback(selected)):
+            return
+        self._forget_rows(selected)
+
+    def _forget_rows(self, agent_ids):
+        for agent_id in agent_ids:
+            row = self._rows.pop(agent_id, None)
+            self._checks.pop(agent_id, None)
+            if row is not None:
+                self._list_layout.removeWidget(row)
+                row.hide()
+                row.deleteLater()
+        self._apply_filter()
+
+    def _restore_agents(self):
+        if self._restore_agents_callback is not None:
+            self._restore_agents_callback()
+
+    def refresh_agents(self, agents, removed_count):
+        """Merge discovery while preserving this open dialog's pending choices."""
+        available = {str(agent.get("agent_id") or "") for agent in agents}
+        for agent_id in list(self._rows):
+            if agent_id not in available:
+                row = self._rows.pop(agent_id)
+                self._checks.pop(agent_id, None)
+                self._list_layout.removeWidget(row)
+                row.hide()
+                row.deleteLater()
+        for agent in agents:
+            agent_id = str(agent.get("agent_id") or "")
+            if not agent_id:
+                continue
+            if agent_id in self._rows:
+                self._rows[agent_id].update_agent(agent)
+                continue
+            check = CheckBox("", self._list_content)
+            check.stateChanged.connect(self._update_count)
+            row = AgentRow(agent, check, self._list_content, removed=self._restoring,
+                           deletable=self._delete_agent_callback is not None)
+            row.delete_requested.connect(self._delete_agent)
+            self._checks[agent_id] = check
+            self._rows[agent_id] = row
+            self._list_layout.insertWidget(self._list_layout.count() - 2, row)
+        if self.restoreAgentsBtn is not None:
+            self.restoreAgentsBtn.setEnabled(removed_count > 0)
+        self.searchEdit.setEnabled(bool(self._rows))
+        self._apply_filter()
 
     def visible_ids(self):
         """IDs of the servers shown by the current search, in display order."""
@@ -457,6 +586,8 @@ class AgentSelectionDialog(MessageBoxBase):
 
     def _update_count(self, *_):
         count = len(self.selected_ids())
+        if self.deleteAgentsBtn is not None:
+            self.deleteAgentsBtn.setEnabled(count > 0)
         text = L(f"已选择 {count} 个", f"{count} selected")
         if self.searchEdit.text().strip() and self._checks:
             shown, total = len(self.visible_ids()), len(self._checks)
@@ -652,6 +783,8 @@ class AgentView(ScrollArea):
         self.setWidgetResizable(True)
         self.enableTransparentBackground()
         self._agents = []
+        self._registry = AgentRegistry(settings)
+        self._selection_dialog = None
         # The combo remains the legacy single-agent path until the selection
         # dialog is applied; afterwards this set is the source for batch
         # start/stop operations, including an intentional empty selection.
@@ -744,6 +877,7 @@ class AgentView(ScrollArea):
         selection.addWidget(self.nodeStatus)
         fields.addLayout(selection, 2, 2)
 
+
         # Node status card, migrated from the Collaborative page.
         status_card = SimpleCardWidget(self.view)
         status_layout = QVBoxLayout(status_card)
@@ -819,6 +953,8 @@ class AgentView(ScrollArea):
         log_layout.addStretch(1)
         self.hubEdit.setText(str(settings.agent_hub_url or ""))
         self.tokenEdit.setText(str(settings.agent_hub_token or ""))
+        self.hubEdit.textChanged.connect(self._on_connection_changed)
+        self.tokenEdit.textChanged.connect(self._on_connection_changed)
         # 日志卡片占满剩余空间，让日志区域延伸到底部而不是悬空一大段
         root.addWidget(log_card, 1)
 
@@ -872,11 +1008,15 @@ class AgentView(ScrollArea):
         return ControllerClient(url, token, ca_file=self._ca_file)
 
     def _async(self, action, fn):
+        # Lists belong to the connection that issued the query. A response
+        # from a previous URL/token must not replace the current server list.
+        result_action = (f"{action}:{self._connection_scope()}"
+                         if action in {"list", "poll_status"} else action)
         def run():
             try:
-                result = (action, fn(), None)
+                result = (result_action, fn(), None)
             except Exception as exc:
-                result = (action, None, exc)
+                result = (result_action, None, exc)
             try:
                 self._result.emit(*result)
             except RuntimeError:
@@ -1463,7 +1603,7 @@ exec python3 agent/server_agent.py --config agent/agent.json
         if self._multi_selection_active:
             self._selected_agent_ids.clear()
             self._multi_selection_active = False
-            self._update_selection_summary()
+        self._update_selection_summary()
 
     def _update_selection_summary(self):
         if self._multi_selection_active:
@@ -1472,16 +1612,162 @@ exec python3 agent/server_agent.py --config agent/agent.json
         else:
             self.selectAgentsBtn.setText(L("多选服务器…", "Select servers…"))
 
+    def _connection_scope(self):
+        return self._registry.scope_key(self.hubEdit.text(), self.tokenEdit.text())
+
+    def _on_connection_changed(self, *_):
+        self._selected_agent_ids.clear()
+        self._multi_selection_active = False
+        self._last_remote_key = ""
+        self._completion_logged.clear()
+        self._refusal_logged.clear()
+        self._apply_agents([])
+        remote_monitor.set_connection("unknown" if self.hubEdit.text().strip() and self.tokenEdit.text().strip()
+                                      else "unconfigured")
+        self.nodeStatus.setText(L("请刷新节点", "Refresh to load agents"))
+        self.refreshBtn.setEnabled(True)
+
+    def _apply_agents(self, agents):
+        """Apply the local removal list to both manual and background updates."""
+        index = self.agentCombo.currentIndex()
+        previous_id = (str(self._agents[index].get("agent_id") or "")
+                       if 0 <= index < len(self._agents) else "")
+        visible = self._registry.filter(self.hubEdit.text(), self.tokenEdit.text(), agents or [])
+        visible = [agent for agent in visible if isinstance(agent, dict) and agent.get("agent_id")]
+        def labels(items):
+            return [(str(agent["agent_id"]), str(agent.get("name") or agent["agent_id"]),
+                     bool(agent.get("online"))) for agent in items]
+        rebuild = labels(visible) != labels(self._agents) or self.agentCombo.count() != len(visible)
+        self._agents = visible
+        available_ids = {str(agent["agent_id"]) for agent in visible}
+        self._selected_agent_ids.intersection_update(available_ids)
+        if rebuild:
+            self._updating_combo = True
+            try:
+                self.agentCombo.clear()
+                for agent_id, name, online in labels(visible):
+                    state = L("在线", "online") if online else L("离线", "offline")
+                    self.agentCombo.addItem(f"{name} [{state}] — {agent_id}")
+                ids = [str(agent["agent_id"]) for agent in visible]
+                if previous_id in ids:
+                    self.agentCombo.setCurrentIndex(ids.index(previous_id))
+                elif self._multi_selection_active:
+                    self.agentCombo.setCurrentIndex(-1)
+            finally:
+                self._updating_combo = False
+        if self._multi_selection_active:
+            count = len(self._selected_agent_ids)
+            self.nodeStatus.setText(L(f"已选择 {count} 个节点", f"{count} agent(s) selected"))
+        else:
+            self.nodeStatus.setText(L(f"已加载 {len(visible)} 个节点", f"Loaded {len(visible)} agent(s)"))
+        self._update_selection_summary()
+        remote_monitor.ingest(visible)
+        self._update_agent_status_widgets()
+        if self._selection_dialog is not None:
+            removed = self._registry.removed(self.hubEdit.text(), self.tokenEdit.text())
+            self._selection_dialog.refresh_agents(visible, len(removed))
+
+    def ask_delete(self, agents, parent=None):
+        names = [f"• {agent.get('name') or agent['agent_id']} ({agent['agent_id']})"
+                 for agent in agents[:FIT_LIST_MAX]]
+        if len(agents) > FIT_LIST_MAX:
+            names.append(L(f"另有 {len(agents) - FIT_LIST_MAX} 个服务器",
+                           f"and {len(agents) - FIT_LIST_MAX} more servers"))
+        text = L(
+            "确定从本机列表删除这些服务器？刷新和重启后不会自动出现，可通过“恢复已删除”重新添加。\n"
+            "服务器上的 Agent 和正在运行的任务会继续运行；需要停止任务时请先取消并点击“停止服务器任务”。",
+            "Remove these servers from this computer's list? They stay removed after refresh or restart. "
+            "Use Restore deleted to add them again.\n"
+            "The Agent and any running jobs will continue on the server. To stop a job, cancel and use Stop server job first.")
+        dialog = MessageBox(L("删除服务器", "Delete servers"), text + "\n\n" + "\n".join(names), parent or self.window())
+        dialog.yesButton.setText(L("删除", "Delete"))
+        dialog.cancelButton.setText(L("取消", "Cancel"))
+        return dialog.exec()
+
+    def delete_agents(self, agent_ids=None, parent=None):
+        selected = set(self._selected_agents_ids() if agent_ids is None else agent_ids)
+        agents = [agent for agent in self._agents if str(agent.get("agent_id") or "") in selected]
+        if not agents:
+            self._show_error(L("请先选择要删除的服务器", "Select servers to delete first"))
+            return False
+        scope = self._connection_scope()
+        if not self.ask_delete(agents, parent=parent) or scope != self._connection_scope():
+            return False
+        try:
+            self._registry.remove(self.hubEdit.text(), self.tokenEdit.text(), agents)
+        except OSError as exc:
+            self._show_error(L(f"无法保存删除记录：{exc}", f"Could not save deleted servers: {exc}"))
+            return False
+        self._selected_agent_ids = set(self._selected_agents_ids()) - selected
+        self._multi_selection_active = True  # Do not silently select the next server.
+        self._last_remote_key = ""
+        for agent in agents:
+            name = agent.get("name") or agent["agent_id"]
+            self._completion_logged.pop(name, None)
+            self._refusal_logged.pop(name, None)
+        self._apply_agents(self._agents)
+        self._updating_combo = True
+        try:
+            self.agentCombo.setCurrentIndex(-1)
+        finally:
+            self._updating_combo = False
+        self._log(L(f"已从本机列表删除 {len(agents)} 个服务器。", f"Deleted {len(agents)} server(s) from this computer's list."))
+        InfoBar.success(L("服务器已删除", "Servers deleted"),
+                        L("可通过“恢复已删除”重新添加。", "Use Restore deleted to add them again."),
+                        parent=parent or self, position=InfoBarPosition.TOP)
+        return True
+
+    def restore_agents(self, parent=None):
+        removed = self._registry.removed(self.hubEdit.text(), self.tokenEdit.text())
+        if not removed:
+            return
+        scope = self._connection_scope()
+        dialog = AgentSelectionDialog(removed, parent=parent or self.window(), restoring=True)
+        if not dialog.exec() or scope != self._connection_scope():
+            return
+        selected = dialog.selected_ids()
+        if not selected:
+            return
+        try:
+            self._registry.restore(self.hubEdit.text(), self.tokenEdit.text(), selected)
+        except OSError as exc:
+            self._show_error(L(f"无法保存恢复记录：{exc}", f"Could not save restored servers: {exc}"))
+            return
+        if self._selection_dialog is not None:
+            remaining = self._registry.removed(self.hubEdit.text(), self.tokenEdit.text())
+            self._selection_dialog.refresh_agents(self._agents, len(remaining))
+        self._log(L(f"已恢复 {len(selected)} 个服务器，正在刷新节点。",
+                    f"Restored {len(selected)} server(s); refreshing agents."))
+        self.refresh_agents()
+
     def select_agents(self):
-        if not self._agents:
+        removed = self._registry.removed(self.hubEdit.text(), self.tokenEdit.text())
+        if not self._agents and not removed:
             self._show_error(L("请先刷新服务器节点列表", "Refresh the server list first"))
             return
         selected = (self._selected_agent_ids if self._multi_selection_active
                     else set(self._selected_agents_ids()))
-        dialog = AgentSelectionDialog(self._agents, selected, self.window())
-        if not dialog.exec():
+        scope = self._connection_scope()
+        def remove_one(agent_id):
+            return (scope == self._connection_scope()
+                    and self.delete_agents([agent_id], parent=dialog))
+        def remove_selected(agent_ids):
+            return (scope == self._connection_scope()
+                    and self.delete_agents(agent_ids, parent=dialog))
+        def restore():
+            if scope == self._connection_scope():
+                self.restore_agents(parent=dialog)
+        dialog = AgentSelectionDialog(self._agents, selected, self.window(), delete_agent=remove_one,
+                                      delete_agents=remove_selected, restore_agents=restore, removed_count=len(removed))
+        self._selection_dialog = dialog
+        try:
+            accepted = dialog.exec()
+        finally:
+            self._selection_dialog = None
+        if not accepted or scope != self._connection_scope():
             return
-        self._selected_agent_ids = set(dialog.selected_ids())
+        available = {str(agent.get("agent_id") or "") for agent in self._agents}
+        self._selected_agent_ids = set(dialog.selected_ids()) & available
         self._multi_selection_active = True
         self._update_selection_summary()
         count = len(self._selected_agent_ids)
@@ -1674,6 +1960,11 @@ exec python3 agent/server_agent.py --config agent/agent.json
         self._async("stop", dispatch)
 
     def _on_result(self, action, value, error):
+        kind, separator, scope = action.partition(":")
+        if separator and kind in {"list", "poll_status"}:
+            if scope != self._connection_scope():
+                return
+            action = kind
         self.refreshBtn.setEnabled(True)
         self.generateBtn.setEnabled(True)
         if error:
@@ -1688,28 +1979,8 @@ exec python3 agent/server_agent.py --config agent/agent.json
             return
         if action in {"list", "poll_status"}:
             remote_monitor.set_connection("ok")
-            remote_monitor.ingest(value or [])
+            self._apply_agents(value)
         if action == "list":
-            self._agents = list(value or [])
-            self._updating_combo = True
-            try:
-                self.agentCombo.clear()
-                for agent in self._agents:
-                    state = L("在线", "online") if agent.get("online") else L("离线", "offline")
-                    self.agentCombo.addItem(f"{agent.get('name', agent['agent_id'])} [{state}] — {agent['agent_id']}")
-            finally:
-                self._updating_combo = False
-            # Remove agents that no longer exist while preserving a valid
-            # multi-selection after a refresh.
-            available_ids = {str(agent.get("agent_id") or "") for agent in self._agents}
-            self._selected_agent_ids.intersection_update(available_ids)
-            if self._multi_selection_active:
-                self.nodeStatus.setText(L(f"已选择 {len(self._selected_agent_ids)} 个节点",
-                                          f"{len(self._selected_agent_ids)} agent(s) selected"))
-            else:
-                self.nodeStatus.setText(L(f"已加载 {len(self._agents)} 个节点",
-                                          f"Loaded {len(self._agents)} agent(s)"))
-            self._update_selection_summary()
             self._log(L(f"已刷新节点列表，共 {len(self._agents)} 个节点。",
                                   f"Agent list refreshed: {len(self._agents)} agent(s)."))
             for agent in self._agents:
@@ -1717,17 +1988,8 @@ exec python3 agent/server_agent.py --config agent/agent.json
                 if event:
                     state = event.get("state", "unknown")
                     self._log(f"{agent.get('agent_id')}: {state}")
-            self._update_agent_status_widgets()
             self._emit_selected_remote_event(force=True)
         elif action == "poll_status":
-            self._agents = list(value or [])
-            available_ids = {str(agent.get("agent_id") or "") for agent in self._agents}
-            self._selected_agent_ids.intersection_update(available_ids)
-            if self._multi_selection_active:
-                self.nodeStatus.setText(L(f"已选择 {len(self._selected_agent_ids)} 个节点",
-                                          f"{len(self._selected_agent_ids)} agent(s) selected"))
-                self._update_selection_summary()
-            self._update_agent_status_widgets()
             self._emit_selected_remote_event()
             if self._last_poll_error:
                 self._log(L("服务器节点状态恢复刷新。", "Server-agent status polling recovered."))

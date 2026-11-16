@@ -66,6 +66,7 @@ class AppSettings:
         "agent_hub_url": "",          # 服务器节点控制 Hub 地址
         "agent_hub_token": "",        # 服务器节点控制令牌
         "agent_hub_ca": "",           # 一体化包生成的自签名 CA 文件
+        "agent_removed_servers": {},  # 按控制通道保存本机已删除的服务器
         "github_login": "",           # 最近一次成功授权的 GitHub 登录名（离线识别作者）
         "engine": "auto",             # 本地压测引擎：auto / rust / python（原生 Rust 引擎，见 ENGINE.md）
     }

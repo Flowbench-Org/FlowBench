@@ -840,6 +840,27 @@ _RESOURCES = [
     ('ノード {#0} は上限内で実行します：{#1} QPS、{#2} 秒、{#3} スレッド', '节点 {#0} 按上限运行：{#1} QPS、{#2} 秒、{#3} 线程', 'Agent {#0} runs within its limits: {#1} QPS, {#2} s, {#3} threads'),
     ('サーバーノード {#0} がタスクを拒否しました：{#1}', '服务器节点 {#0} 拒绝了任务：{#1}', 'Server node {#0} refused the job: {#1}'),
     ('ノードの上限：毎秒最大 {#0} リクエスト、1 タスク最長 {#1} 秒、最大 {#2} スレッド。変更するには、サーバーの agent.json で max_rate、max_duration、max_threads を編集してからノードを再起動してください。', '节点上限：每秒最多 {#0} 次请求，单个任务最长 {#1} 秒，最多 {#2} 个线程。要调整，就改服务器上 agent.json 里的 max_rate、max_duration、max_threads，然后重启节点。', 'Agent limits: at most {#0} requests per second, {#1} s per job and {#2} threads. To change them, edit max_rate, max_duration and max_threads in agent.json on the server, then restart the agent.'),
+    ('削除済み', '已删除', 'deleted'),
+    ('選択項目を削除', '删除所选', 'Delete selected'),
+    ('選択したサーバーをこのパソコンの一覧から削除します。更新や再起動後も削除状態を保ちます。', '从本机列表删除所选服务器，刷新或重启后保持删除。', "Remove selected servers from this computer's list, including after refresh or restart."),
+    ('削除済みを復元…', '恢复已删除…', 'Restore deleted…'),
+    ('現在の制御チャネルの一覧に戻すサーバーを選択します。', '选择要恢复到当前控制通道列表的服务器。', "Choose servers to restore to the current control channel's list."),
+    ('ノードを更新してください', '请刷新节点', 'Refresh to load agents'),
+    ('これらのサーバーをこのパソコンの一覧から削除しますか？更新や再起動後も自動では表示されません。「削除済みを復元」から戻せます。\nサーバー上の Agent と実行中のタスクは動作を続けます。タスクを停止する場合はキャンセルし、先に「サーバーのタスクを停止」を押してください。', '确定从本机列表删除这些服务器？刷新和重启后不会自动出现，可通过“恢复已删除”重新添加。\n服务器上的 Agent 和正在运行的任务会继续运行；需要停止任务时请先取消并点击“停止服务器任务”。', "Remove these servers from this computer's list? They stay removed after refresh or restart. Use Restore deleted to add them again.\nThe Agent and any running jobs will continue on the server. To stop a job, cancel and use Stop server job first."),
+    ('サーバーを削除', '删除服务器', 'Delete servers'),
+    ('削除', '删除', 'Delete'),
+    ('このパソコンの一覧から {#0} 台のサーバーを削除しました。', '已从本机列表删除 {#0} 个服务器。', "Deleted {#0} server(s) from this computer's list."),
+    ('サーバーを削除しました', '服务器已删除', 'Servers deleted'),
+    ('「削除済みを復元」から戻せます。', '可通过“恢复已删除”重新添加。', 'Use Restore deleted to add them again.'),
+    ('{#0} 台のサーバーを復元しました。ノードを更新しています。', '已恢复 {#0} 个服务器，正在刷新节点。', 'Restored {#0} server(s); refreshing agents.'),
+    ('削除済みサーバーを復元', '恢复已删除服务器', 'Restore deleted servers'),
+    ('選択項目を復元', '恢复所选', 'Restore selected'),
+    ('復元するサーバーを選択', '选择要恢复的服务器', 'Choose servers to restore'),
+    ('復元後、現在の制御チャネルを更新します。動作中で接続可能なノードは一覧に再表示されます。', '恢复后会刷新当前控制通道；节点仍在运行且连接可用时，将重新出现在列表中。', 'After restoring, the current control channel is refreshed. Running, reachable agents reappear in the list.'),
+    ('ほか {#0} 台のサーバー', '另有 {#0} 个服务器', 'and {#0} more servers'),
+    ('削除するサーバーを先に選択してください', '请先选择要删除的服务器', 'Select servers to delete first'),
+    ('削除記録を保存できません：{#0}', '无法保存删除记录：{#0}', 'Could not save deleted servers: {#0}'),
+    ('復元記録を保存できません：{#0}', '无法保存恢复记录：{#0}', 'Could not save restored servers: {#0}'),
 ]
 _EXTRA = {
     "Japanese Language Pack": "日本語言語パック",
@@ -1117,7 +1138,7 @@ def uninstall():
 class Plugin(FlowBenchPlugin):
     name = ("日语语言包", "Japanese Language Pack")
     title = "日本語言語パック"
-    version = "1.0.12"
+    version = "1.0.13"
     author = "FlowBench"
     description = (
         "将 FlowBench 的界面、对话框和动态提示转换为日语，兼容深浅色主题；启用即生效。",

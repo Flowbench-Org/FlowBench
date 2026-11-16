@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.2.18] - 2026-11-16
+
+### Added
+
+- The server selection panel now has a red **Delete** button on the right of each server row. Its toolbar offers **Select all**, **Clear**, a red **Delete** button for all checked servers (including checked servers hidden by a search), and **Restore deleted**. Removal is saved on this computer for the current control URL and token, survives refreshes and restarts, and also removes the server from Monitor. It does not stop jobs or uninstall the remote Agent; restore selected servers to discover them again, even after every server has been removed.
+
+### Fixed
+
+- Open server selection panels now update existing rows when a node goes online or offline, is renamed, or reports new system information. Search results and tooltips refresh with the data while checked servers stay selected.
+- Linux server nodes restore a bundled native engine's executable permission when an extraction or file-transfer tool has dropped it. A binary that cannot be made executable is skipped, allowing the Python fallback in `auto` mode.
+- Each server-agent job logs the selected engine and, when it falls back to Python, why the native engine could not be used.
+- Linux all-in-one node startup installs dependencies only when `requests` is missing. Systems without pip, or where pip refuses the installation, receive instructions for installing `python3-requests` through the system package manager.
+
 ## [1.2.17] - 2026-11-16
 
 ### Added

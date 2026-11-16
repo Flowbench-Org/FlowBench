@@ -94,7 +94,7 @@ One step (stops at the first failure and prints the installer path):
 
 ```bash
 powershell -ExecutionPolicy Bypass -File build_installer.ps1
-# Output: installer/FlowBench-Setup-1.2.17.exe
+# Output: installer/FlowBench-Setup-1.2.18.exe
 ```
 
 Python, the packages in `requirements.txt` and PyInstaller build the application and its own
@@ -113,7 +113,7 @@ powershell -File build_all.ps1
 python -m PyInstaller --clean --noconfirm Uninstall.spec
 python tools/make_payload.py
 python -m PyInstaller --clean --noconfirm Setup.spec
-# Output: dist/FlowBench-Setup-1.2.17.exe
+# Output: dist/FlowBench-Setup-1.2.18.exe
 ```
 
 To publish, upload `FlowBench-Setup-<version>.exe` to the GitHub release under exactly that
@@ -215,7 +215,7 @@ python main.py
 
 ```bash
 powershell -ExecutionPolicy Bypass -File build_installer.ps1
-# 产物位于 installer/FlowBench-Setup-1.2.17.exe
+# 产物位于 installer/FlowBench-Setup-1.2.18.exe
 ```
 
 Python、`requirements.txt` 中的依赖和 PyInstaller 即可构建应用与自带安装程序
@@ -234,7 +234,7 @@ powershell -File build_all.ps1
 python -m PyInstaller --clean --noconfirm Uninstall.spec
 python tools/make_payload.py
 python -m PyInstaller --clean --noconfirm Setup.spec
-# 产物位于 dist/FlowBench-Setup-1.2.17.exe
+# 产物位于 dist/FlowBench-Setup-1.2.18.exe
 ```
 
 发布时把 `FlowBench-Setup-<版本号>.exe` 原名上传到 GitHub Release，软件内更新按这个文件名查找。
