@@ -874,9 +874,15 @@ class AgentView(ScrollArea):
     def _async(self, action, fn):
         def run():
             try:
-                self._result.emit(action, fn(), None)
+                result = (action, fn(), None)
             except Exception as exc:
-                self._result.emit(action, None, exc)
+                result = (action, None, exc)
+            try:
+                self._result.emit(*result)
+            except RuntimeError:
+                # The page was closed while the request ran ("Signal source
+                # has been deleted"); there is nobody left to tell.
+                pass
         threading.Thread(target=run, daemon=True).start()
 
     @staticmethod
