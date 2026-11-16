@@ -874,9 +874,15 @@ class AgentView(ScrollArea):
     def _async(self, action, fn):
         def run():
             try:
-                self._result.emit(action, fn(), None)
+                result = (action, fn(), None)
             except Exception as exc:
-                self._result.emit(action, None, exc)
+                result = (action, None, exc)
+            try:
+                self._result.emit(*result)
+            except RuntimeError:
+                # The page was closed while the request ran ("Signal source
+                # has been deleted"); there is nobody left to tell.
+                pass
         threading.Thread(target=run, daemon=True).start()
 
     @staticmethod
@@ -1400,14 +1406,16 @@ exec python3 agent/server_agent.py --config agent/agent.json
     def _linux_engine_path(cls, linux_root):
         """Locate a prebuilt Linux native-engine binary to ship in a node
         bundle, or ``None``. Checked in order: the FLOWBENCH_LINUX_ENGINE
-        override, the binary staged beside the Linux payload, then the cargo
-        build output. A node runs it only when its CPU/libc match; otherwise
-        the agent falls back to the Python worker."""
+        override, the binary staged beside the Linux payload, the cargo build
+        output, then the committed glibc-2.17 build (engine/prebuilt). A node
+        runs it only when its CPU/libc match; otherwise the agent falls back
+        to the Python worker."""
         project = Path(__file__).resolve().parents[2]
         candidates = [
             os.environ.get("FLOWBENCH_LINUX_ENGINE") or "",
             str(Path(linux_root) / "flowbench-engine"),
             str(project / "engine" / "target" / "release" / "flowbench-engine"),
+            str(project / "engine" / "prebuilt" / "linux-x86_64" / "flowbench-engine"),
         ]
         for candidate in candidates:
             if candidate and Path(candidate).is_file():

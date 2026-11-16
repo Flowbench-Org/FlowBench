@@ -364,10 +364,19 @@ class InstallerWindow(FramelessWindow):
             return exc.text(self.chinese)
         return f"{type(exc).__name__}: {exc}"
 
-    def _set_elided(self, widget, text: str):
-        metrics = widget.fontMetrics()
-        widget.setText(metrics.elidedText(text, Qt.ElideMiddle, max(200, widget.width())))
-        widget.setToolTip(text if widget.text() != text else "")
+    def _set_progress_line(self, widget, prefix: str, detail: str = ""):
+        """A progress line: the fixed words in full (the label wraps them if it
+        must) and only the file name elided, in the middle, to the room left.
+        Eliding the whole line cut the fixed words too, e.g. "Waiting for
+        …nch to exit…" where the font is wider than the label (Windows)."""
+        full = prefix + detail
+        text = full
+        if detail:
+            metrics = widget.fontMetrics()
+            room = max(120, widget.width() - metrics.horizontalAdvance(prefix))
+            text = prefix + metrics.elidedText(detail, Qt.ElideMiddle, room)
+        widget.setText(text)
+        widget.setToolTip(full if text != full else "")
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -613,7 +622,7 @@ class SetupWindow(InstallerWindow):
         layout.addWidget(self.progressBar)
         layout.addSpacing(8)
         info = QHBoxLayout()
-        self.progressDetail = label(CaptionLabel, page, 12, colors=SECONDARY)
+        self.progressDetail = label(CaptionLabel, page, 12, colors=SECONDARY, wrap=True)
         self.percentLabel = label(CaptionLabel, page, 12, QFont.DemiBold, colors=SECONDARY)
         self.percentLabel.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.percentLabel.setMinimumWidth(40)
@@ -851,17 +860,21 @@ class SetupWindow(InstallerWindow):
         self.worker.failed.connect(self._on_failure)
         self.worker.start()
 
-    def _progress_text(self) -> str:
+    def _progress_parts(self):
+        """The progress line as (fixed words, file name)."""
         pct, detail = self._progress
         if self.update_mode and self.busy and pct == 0 and not detail and self.wait_pid:
-            return self.t("正在等待 FlowBench 退出…", "Waiting for FlowBench to exit…")
+            return self.t("正在等待 FlowBench 退出…", "Waiting for FlowBench to exit…"), ""
         if pct >= SetupSession.STAGE_END:
             if detail and pct >= 97:
-                return self.t(f"正在卸载旧版：{detail}", f"Removing the old version: {detail}")
-            return self.t("正在完成安装…", "Finishing…")
+                return self.t("正在卸载旧版：", "Removing the old version: "), detail
+            return self.t("正在完成安装…", "Finishing…"), ""
         if detail:
-            return self.t("正在解压：", "Extracting: ") + detail
-        return ""
+            return self.t("正在解压：", "Extracting: "), detail
+        return "", ""
+
+    def _progress_text(self) -> str:
+        return "".join(self._progress_parts())
 
     def _on_progress(self, pct: int, detail: str):
         self._progress = (pct, detail)
@@ -874,7 +887,7 @@ class SetupWindow(InstallerWindow):
                 self.stopButton.setEnabled(False)
             self._staging = False
         label_ = self.updateDetail if self.update_mode else self.progressDetail
-        self._set_elided(label_, self._progress_text())
+        self._set_progress_line(label_, *self._progress_parts())
 
     def _render_progress(self):
         if self.update_mode:
@@ -889,7 +902,7 @@ class SetupWindow(InstallerWindow):
             self.progressTitle.setText(self.t(f"正在安装 FlowBench {self.version}…",
                                               f"Installing FlowBench {self.version}…"))
             self.stopButton.setText(self.t("取消", "Cancel"))
-            self._set_elided(self.progressDetail, self._progress_text())
+            self._set_progress_line(self.progressDetail, *self._progress_parts())
         self.progressError.setVisible(failed)
         self.retryButton.setVisible(failed)
         # Nothing was put in place yet, so another folder can be chosen.
@@ -1068,7 +1081,7 @@ class SetupWindow(InstallerWindow):
         else:
             self.updateTitle.setText(self.t(f"正在更新到 FlowBench {self.version}…",
                                             f"Updating to FlowBench {self.version}…"))
-            self._set_elided(self.updateDetail, self._progress_text())
+            self._set_progress_line(self.updateDetail, *self._progress_parts())
         self.updateDetail.setTextColor(*(ERROR if failed else SECONDARY))
         self.updateRetry.setVisible(failed)
         self.updateClose.setVisible(failed)
