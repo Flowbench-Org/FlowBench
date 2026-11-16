@@ -632,6 +632,15 @@ _RESOURCES = [
     ('新しいテストの初期実行時間', '新会话的初始测试时长', 'Initial test duration for new sessions'),
     ('既定のパケットサイズ（バイト）', '默认报文大小(字节)', 'Default packet size (bytes)'),
     ('TCP・UDP・プラグインプロトコルのペイロードサイズ', 'TCP、UDP 与插件协议的发送载荷大小', 'Payload size for TCP, UDP and plugin protocols'),
+    ('負荷テストエンジン', '压测引擎', 'Load engine'),
+    ('自動（推奨）', '自动（推荐）', 'Auto (recommended)'),
+    ('ネイティブエンジン（Rust）', '原生引擎（Rust）', 'Native engine (Rust)'),
+    ('Python エンジン', 'Python 引擎', 'Python engine'),
+    ('エンジン', '引擎选择', 'Engine'),
+    ('自動：ネイティブエンジンが見つかればそれを使い、なければ Python エンジンを使います。対象は HTTP/HTTPS のみで、TCP・UDP・ICMP とプラグインプロトコルは常に Python エンジンを使います。', '自动：找到原生引擎就用它，否则用 Python 引擎。只影响 HTTP/HTTPS；TCP、UDP、ICMP 和插件协议始终使用 Python 引擎。', 'Auto uses the native engine when it is found, else the Python engine. Only HTTP/HTTPS; TCP, UDP, ICMP and plugin protocols always use the Python engine.'),
+    ('ネイティブエンジンが見つかりました：', '已找到原生引擎：', 'Native engine found: '),
+    ('ネイティブエンジンが見つかりません。「ネイティブエンジン（Rust）」を選んでいる間は HTTP/HTTPS のテストを開始できません。「自動（推奨）」を選んでください。', '未找到原生引擎：选择“原生引擎（Rust）”时 HTTP/HTTPS 压测无法启动，请改用“自动（推荐）”。', 'Native engine not found: while “Native engine (Rust)” is selected, HTTP/HTTPS tests cannot start. Choose “Auto (recommended)” instead.'),
+    ('ネイティブエンジンが見つかりません。HTTP/HTTPS のテストには Python エンジンを使います。', '未找到原生引擎，HTTP/HTTPS 压测将使用 Python 引擎。', 'Native engine not found; HTTP/HTTPS tests use the Python engine.'),
     ('バックアップと診断', '备份与诊断', 'Backup & Diagnostics'),
     ('監査ログ', '审计日志', 'Audit Log'),
     ('このアプリについて', '关于', 'About'),
@@ -1108,7 +1117,7 @@ def uninstall():
 class Plugin(FlowBenchPlugin):
     name = ("日语语言包", "Japanese Language Pack")
     title = "日本語言語パック"
-    version = "1.0.11"
+    version = "1.0.12"
     author = "FlowBench"
     description = (
         "将 FlowBench 的界面、对话框和动态提示转换为日语，兼容深浅色主题；启用即生效。",

@@ -28,6 +28,7 @@ class AppSettings:
         "default_packet_size",
         "minimize_to_tray",
         "auto_check_updates",
+        "engine",
     )
 
     _INT_RANGES = {
@@ -284,6 +285,10 @@ class AppSettings:
             lo, hi = cls._INT_RANGES[key]
             if type(value) is not int or not lo <= value <= hi:
                 raise ValueError(f"{key} must be an integer in [{lo}, {hi}]")
+            return value
+        if key == "engine":
+            if type(value) is not str or value not in ("auto", "rust", "python"):
+                raise ValueError("engine must be auto, rust or python")
             return value
         if key in ("animations_enabled", "minimize_to_tray",
                    "auto_check_updates"):

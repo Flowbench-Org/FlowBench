@@ -19,6 +19,14 @@ AUTHOR_NAME = "Carlown"
 AUTHOR_URL = "https://github.com/Carlown"
 
 
+# Order of the engine combo box; the values are settings.engine's.
+ENGINE_MODES = ("auto", "rust", "python")
+
+
+def _engine_index(mode):
+    return ENGINE_MODES.index(mode) if mode in ENGINE_MODES else 0
+
+
 class SettingRow(QWidget):
     def __init__(self, title, desc, control, parent=None):
         super().__init__(parent)
@@ -267,6 +275,33 @@ class SettingsView(ScrollArea):
             spin.setFixedWidth(spin_width)
         root.addWidget(defaults)
 
+        # 压测引擎：只影响 HTTP/HTTPS，TCP、UDP、ICMP 和插件协议始终用 Python 引擎
+        engineCard = SimpleCardWidget(self.view)
+        el = QVBoxLayout(engineCard)
+        el.setContentsMargins(20, 16, 20, 16)
+        el.setSpacing(4)
+        el.addWidget(StrongBodyLabel(L("压测引擎", "Load engine"), engineCard))
+        self.engineCombo = ComboBox()
+        self.engineCombo.addItems([
+            L("自动（推荐）", "Auto (recommended)"),
+            L("原生引擎（Rust）", "Native engine (Rust)"),
+            L("Python 引擎", "Python engine"),
+        ])
+        self.engineCombo.setCurrentIndex(_engine_index(settings.engine))
+        self.engineCombo.currentIndexChanged.connect(self._engine_changed)
+        el.addWidget(SettingRow(
+            L("引擎选择", "Engine"),
+            L("自动：找到原生引擎就用它，否则用 Python 引擎。只影响 HTTP/HTTPS；"
+              "TCP、UDP、ICMP 和插件协议始终使用 Python 引擎。",
+              "Auto uses the native engine when it is found, else the Python engine. "
+              "Only HTTP/HTTPS; TCP, UDP, ICMP and plugin protocols always use the Python engine."),
+            self.engineCombo, engineCard))
+        self.engineStatus = CaptionLabel("", engineCard)
+        self.engineStatus.setWordWrap(True)
+        el.addWidget(self.engineStatus)
+        root.addWidget(engineCard)
+        self._refresh_engine_status()
+
         # 设置备份与恢复（仅处理安全偏好，不导出授权目标、Token 或插件私有数据）
         dataCard = SimpleCardWidget(self.view)
         dataLay = QVBoxLayout(dataCard)
@@ -407,6 +442,38 @@ class SettingsView(ScrollArea):
         control.blockSignals(was_blocked)
         self._show_preference_save_error(name)
 
+    def _engine_changed(self, idx):
+        mode = ENGINE_MODES[idx] if 0 <= idx < len(ENGINE_MODES) else "auto"
+        if not settings.set("engine", mode):
+            was_blocked = self.engineCombo.blockSignals(True)
+            self.engineCombo.setCurrentIndex(_engine_index(settings.engine))
+            self.engineCombo.blockSignals(was_blocked)
+            self._show_preference_save_error("engine")
+        self._refresh_engine_status()
+
+    def _refresh_engine_status(self):
+        """Say whether the native engine binary is there, so "Native engine"
+        failing to start (or Auto quietly using Python) is not a mystery."""
+        try:
+            from agent.engine_bridge import find_engine_binary
+            binary = find_engine_binary()
+        except Exception:
+            binary = None
+        if binary:
+            text = L("已找到原生引擎：", "Native engine found: ") + str(binary)
+        elif settings.engine == "rust":
+            text = L("未找到原生引擎：选择“原生引擎（Rust）”时 HTTP/HTTPS 压测无法启动，请改用“自动（推荐）”。",
+                     "Native engine not found: while “Native engine (Rust)” is selected, "
+                     "HTTP/HTTPS tests cannot start. Choose “Auto (recommended)” instead.")
+        else:
+            text = L("未找到原生引擎，HTTP/HTTPS 压测将使用 Python 引擎。",
+                     "Native engine not found; HTTP/HTTPS tests use the Python engine.")
+        self.engineStatus.setText(text)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._refresh_engine_status()   # the engine may have been built meanwhile
+
     def _theme_changed(self, checked):
         theme = "dark" if checked else "light"
         if not settings.set("theme", theme):
@@ -474,12 +541,14 @@ class SettingsView(ScrollArea):
             (self.rateSpin, "setValue", int(settings.default_rate)),
             (self.durationSpin, "setValue", int(settings.default_duration)),
             (self.packetSizeSpin, "setValue", int(settings.default_packet_size)),
+            (self.engineCombo, "setCurrentIndex", _engine_index(settings.engine)),
         )
         for control, setter, value in controls:
             was_blocked = control.blockSignals(True)
             getattr(control, setter)(value)
             control.blockSignals(was_blocked)
         self.colorPicker._refresh()
+        self._refresh_engine_status()
 
     def _apply_preference_theme(self):
         """恢复/重置后立即应用外观偏好。"""
