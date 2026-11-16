@@ -1,5 +1,6 @@
 import os
 import tempfile
+import time
 import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -30,6 +31,28 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(normalize_host("exam\tple.test"), "")
         self.assertEqual(normalize_host("example.test\x00"), "")
         self.assertEqual(normalize_host("http://example.test:8080/a?b=c"), "example.test")
+
+    def test_desktop_engine_does_not_follow_redirects(self):
+        from tests.loopback import LoopbackServer, http_ok, http_redirect
+        elsewhere = LoopbackServer(http_ok)
+        self.addCleanup(elsewhere.close)
+        server = LoopbackServer(http_redirect(f"http://127.0.0.1:{elsewhere.port}/"))
+        self.addCleanup(server.close)
+        engine = StressEngine()
+        reports = []
+        engine.report_ready.connect(reports.append)
+        self.assertTrue(engine.start({
+            "target": "127.0.0.1", "protocol": "HTTP", "port": server.port,
+            "url": f"http://127.0.0.1:{server.port}/", "threads": 2, "rate": 10,
+            "duration": 1, "packet_size": 64, "timeout": 2000}))
+        deadline = time.monotonic() + 15
+        while not reports and time.monotonic() < deadline:
+            self.app.processEvents()
+            time.sleep(0.02)
+        self.assertTrue(reports, "no report")
+        self.assertGreater(reports[0]["total"], 0)
+        self.assertEqual(reports[0]["success"], reports[0]["total"])   # a 302 is below 400
+        self.assertEqual(elsewhere.connections, 0, "the load followed the redirect")
 
     def test_stress_engine_rejects_invalid_or_non_finite_config(self):
         engine = StressEngine()

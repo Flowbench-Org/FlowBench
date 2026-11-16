@@ -255,16 +255,21 @@ class StressEngine(QObject):
             err = None
             nbytes = 0  # 本次请求实际发送的字节数
             try:
+                # Redirects are never followed: they can point anywhere, and
+                # the load must stay on the authorized host (as in the native
+                # engine and the agent worker).
                 if proto == "HTTP":
                     with session.get(c["url"], timeout=timeout,
-                                     headers=c.get("headers")) as r:
+                                     headers=c.get("headers"),
+                                     allow_redirects=False) as r:
                         ok = r.status_code < 400
                         nbytes = _http_req_bytes(r)
                         if not ok:
                             err = f"HTTP {r.status_code}"
                 elif proto == "HTTPS":
                     with session.get(c["url"], timeout=timeout,
-                                     headers=c.get("headers"), verify=False) as r:
+                                     headers=c.get("headers"), verify=False,
+                                     allow_redirects=False) as r:
                         ok = r.status_code < 400
                         nbytes = _http_req_bytes(r)
                         if not ok:
