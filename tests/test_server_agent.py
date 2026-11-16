@@ -81,6 +81,23 @@ class AgentValidationTests(unittest.TestCase):
                             self.assertRaisesRegex(ValueError, f"{key} must be more than 0"):
                         load(**{key: bad})
 
+    def test_start_says_which_engine_runs_the_job(self):
+        class Runner:
+            running = True
+
+            def start(self):
+                return True
+
+            def describe(self):
+                return "Python worker; no native engine found"
+
+        runtime = AgentRuntime(dict(self.config))
+        with patch("server_agent.make_stress_job", return_value=Runner()), \
+             patch("builtins.print") as printed:
+            runtime.handle({"type": "start", "job_id": "j1", "config": {
+                "target": "example.test", "protocol": "HTTP", "rate": 1, "duration": 1}})
+        printed.assert_called_with("[agent] job started: j1 (Python worker; no native engine found)")
+
     def test_target_sync_updates_allow_list(self):
         runtime = AgentRuntime(dict(self.config))
         runtime.handle({"type": "sync_targets", "targets": ["https://new.example/path"]})

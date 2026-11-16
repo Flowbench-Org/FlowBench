@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import stat
 import subprocess
 import sys
 import threading
@@ -36,12 +37,32 @@ def _engine_names():
     return ("flowbench-engine",)
 
 
+def _ensure_executable(path):
+    """Whether ``path`` can be run, restoring its executable bit if needed.
+
+    A node bundle unpacked by a tool that drops Unix modes (Python's zipfile,
+    or a Windows extract copied up over SFTP) leaves the engine 0644. Spawning
+    it then fails and ``auto`` quietly runs the Python worker instead, so put
+    back the bit as ``chmod +x`` would (for whoever may read the file).
+    """
+    if os.name == "nt" or os.access(path, os.X_OK):
+        return True
+    try:
+        mode = os.stat(path).st_mode
+        os.chmod(path, mode | stat.S_IXUSR | ((mode & 0o044) >> 2))
+    except OSError:
+        return False
+    return os.access(path, os.X_OK)
+
+
 def find_engine_binary(config=None):
     """Locate the native engine binary, or return ``None``.
 
     Order: ``FLOWBENCH_ENGINE`` env var, the ``engine_path`` config key, next to
     the (frozen) executable, the PyInstaller bundle dir, then the
-    ``engine/target/release`` build output or a copy at the repo root.
+    ``engine/target/release`` build output or a copy at the repo root. A file
+    found by that search gets its executable bit back if it lost it, and is
+    skipped if it cannot be made executable.
     """
     config = config or {}
 
@@ -73,7 +94,7 @@ def find_engine_binary(config=None):
         seen.add(directory)
         for name in _engine_names():
             candidate = os.path.join(directory, name)
-            if os.path.isfile(candidate):
+            if os.path.isfile(candidate) and _ensure_executable(candidate):
                 return candidate
     return None
 
@@ -366,6 +387,8 @@ class _StressJob:
         self._agent_config = agent_config
         self._mode = mode
         self._impl = None
+        self.engine = None        # "native" or "python" once started
+        self._native_issue = None  # why auto mode did not use the native engine
 
     @property
     def running(self):
@@ -378,15 +401,30 @@ class _StressJob:
                 native = RustStressJob(self._job, self._on_snapshot, self._on_report, binary)
                 if native.start():
                     self._impl = native
+                    self.engine = "native"
                     return True
+                self._native_issue = "the native engine did not start"
+            else:
+                self._native_issue = "no native engine found"
             if self._mode == "rust":
                 return False  # required but unavailable; do not fall back
 
         python = HeadlessStressJob(self._job, self._on_snapshot, self._on_report)
         if python.start():
             self._impl = python
+            self.engine = "python"
             return True
         return False
+
+    def describe(self):
+        """Which engine runs the job, and why not the native one, for the
+        agent's console (an ARM or musl node, or a missing binary, quietly
+        runs the Python worker in ``auto`` mode)."""
+        if self.engine == "native":
+            return "native engine"
+        if self._native_issue:
+            return f"Python worker; {self._native_issue}"
+        return "Python worker"
 
     def stop(self):
         if self._impl:

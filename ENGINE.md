@@ -108,8 +108,12 @@ refuses an engine whose number it does not know.
 The binary is located, in order: `FLOWBENCH_ENGINE` env var, the `engine_path`
 config key, next to the (frozen) executable, the PyInstaller bundle dir, then
 `engine/target/release/` or the repo root in a source checkout. Relative
-`FLOWBENCH_ENGINE`/`engine_path` values are resolved to absolute paths. The
-desktop app reads the same `engine` mode from its settings (`engine` in
+`FLOWBENCH_ENGINE`/`engine_path` values are resolved to absolute paths. A
+binary found by that search that lost its executable bit (a bundle unpacked by
+a tool that drops Unix modes) gets it back, as `chmod +x` would; one that cannot
+be made executable is skipped. The agent's console says which engine runs each
+job, e.g. `[agent] job started: <id> (native engine)` or
+`(Python worker; no native engine found)`. The desktop app reads the same `engine` mode from its settings (`engine` in
 `settings.json`, default `auto`) and uses the native engine only for HTTP/HTTPS.
 
 ## Shipping the engine to nodes

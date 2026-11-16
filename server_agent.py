@@ -372,12 +372,15 @@ class AgentRuntime:
         job = validate_job(command.get("config") or {}, self.config)
         self.job_id = str(command.get("job_id") or uuid.uuid4().hex)
         self._set_event({"state": "starting", "job_id": self.job_id, "target": job["target"], "protocol": job["protocol"], "ts": time.time()})
-        self.job = make_stress_job(job, self._on_snapshot, self._on_report, self.config)
-        if not self.job.start():
+        job_id = self.job_id
+        runner = self.job = make_stress_job(job, self._on_snapshot, self._on_report, self.config)
+        if not runner.start():
             self.job = None
             self.job_id = None
             raise RuntimeError("job could not start")
-        print(f"[agent] job started: {self.job_id}")
+        # Read from the local: a job that ends at once clears self.job.
+        how = runner.describe() if hasattr(runner, "describe") else ""
+        print(f"[agent] job started: {job_id}" + (f" ({how})" if how else ""))
 
 
 def agent_limits(config) -> dict:
