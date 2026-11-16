@@ -114,7 +114,7 @@ class UninstallWindow(InstallerWindow):
         layout.addWidget(self.progressBar)
         layout.addSpacing(8)
         info = QHBoxLayout()
-        self.progressDetail = label(CaptionLabel, page, 12, colors=SECONDARY)
+        self.progressDetail = label(CaptionLabel, page, 12, colors=SECONDARY, wrap=True)
         self.percentLabel = label(CaptionLabel, page, 12, QFont.DemiBold, colors=SECONDARY)
         self.percentLabel.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.percentLabel.setMinimumWidth(40)
@@ -198,15 +198,19 @@ class UninstallWindow(InstallerWindow):
             self.dataNote.setTextColor(*SECONDARY)
         self.dataNote.setText(f"{text}\n{self.data_dir}")
 
-    def _progress_text(self) -> str:
+    def _progress_parts(self):
+        """The progress line as (fixed words, file name)."""
         pct, detail = self._progress
         if pct < UninstallSession.FILES_END:
-            return self.t("正在删除：", "Removing: ") + detail if detail else ""
+            return (self.t("正在删除：", "Removing: "), detail) if detail else ("", "")
         if pct < 94:
-            return self.t("正在删除快捷方式和卸载信息…", "Removing shortcuts and the Apps entry…")
+            return self.t("正在删除快捷方式和卸载信息…", "Removing shortcuts and the Apps entry…"), ""
         if pct < 100:
-            return self.t("正在删除设置和日志…", "Deleting settings and logs…")
-        return ""
+            return self.t("正在删除设置和日志…", "Deleting settings and logs…"), ""
+        return "", ""
+
+    def _progress_text(self) -> str:
+        return "".join(self._progress_parts())
 
     def _render_progress(self):
         failed = self.phase == "failed"
@@ -216,7 +220,7 @@ class UninstallWindow(InstallerWindow):
             self.progressDetail.setText("")
         else:
             self.progressTitle.setText(self.t("正在卸载 FlowBench…", "Uninstalling FlowBench…"))
-            self._set_elided(self.progressDetail, self._progress_text())
+            self._set_progress_line(self.progressDetail, *self._progress_parts())
         self.progressError.setVisible(failed)
         self.closeButton.setVisible(failed)
         self.retryButton.setVisible(failed)
@@ -282,7 +286,7 @@ class UninstallWindow(InstallerWindow):
         self.progressBar.setValue(pct)
         self.percentLabel.setText(f"{pct}%")
         self.progressLogo.set_liquid("drain", pct / 100.0)
-        self._set_elided(self.progressDetail, self._progress_text())
+        self._set_progress_line(self.progressDetail, *self._progress_parts())
 
     def _on_success(self, warnings):
         self.busy = False

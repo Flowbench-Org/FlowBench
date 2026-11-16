@@ -539,6 +539,25 @@ class WizardTests(unittest.TestCase):
         self.assertTrue(gui.motion_enabled(FakePlatform(self.root)))
         self.assertTrue(winplat.animations_enabled())           # not Windows: on
 
+    def test_progress_line_keeps_its_words_and_elides_only_the_file_name(self):
+        # Eliding the whole line cut the fixed words too ("Waiting for …nch to
+        # exit…") where the font is wider than the label, as on Windows.
+        with mock.patch.object(SetupWindow, "start_update", lambda self: None):
+            win = SetupWindow(self.payload, self.info, update=True, target=self.target,
+                              wait_pid=7, chinese=False, platform=self.platform, resources=ROOT)
+        win.show()
+        self.addCleanup(win.close)
+        win.busy = True
+        win.updateDetail.setFixedWidth(120)
+        win._on_progress(0, "")
+        self.assertEqual(win.updateDetail.text(), "Waiting for FlowBench to exit…")
+        name = "plugins/" + "a_rather_long_folder_name/" * 10 + "FlowBench.exe"
+        win._on_progress(10, name)
+        text = win.updateDetail.text()
+        self.assertTrue(text.startswith("Extracting: "), text)
+        self.assertIn("…", text)
+        self.assertEqual(win.updateDetail.toolTip(), "Extracting: " + name)
+
     def test_update_window_texts(self):
         with mock.patch.object(SetupWindow, "start_update", lambda self: None):
             win = SetupWindow(self.payload, self.info, update=True, target=self.target,
@@ -583,6 +602,15 @@ class UninstallLookTests(unittest.TestCase):
         win.show()
         self.addCleanup(win.close)
         return win
+
+    def test_progress_line_keeps_its_words(self):
+        win = self.window()
+        win.progressDetail.setFixedWidth(120)
+        win._on_progress(90, "")   # past the files: a fixed message only
+        self.assertEqual(win.progressDetail.text(), "Removing shortcuts and the Apps entry…")
+        win._on_progress(10, "C:/Program Files/FlowBench/" + "deep_folder/" * 12 + "a.dll")
+        self.assertTrue(win.progressDetail.text().startswith("Removing: "))
+        self.assertIn("…", win.progressDetail.text())
 
     def test_both_languages(self):
         win = self.window()
