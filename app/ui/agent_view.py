@@ -1136,8 +1136,17 @@ exec python3 server_agent.py --config agent.json
             linux_all = """#!/usr/bin/env bash
 set -e
 cd "$(dirname "$0")"
-if [ "${SKIP_PIP:-0}" != "1" ]; then
-    python3 -m pip install --user -r agent/requirements.txt
+# The Hub needs only the standard library and the agent only requests, which
+# most server images already have, so pip runs only when requests is missing
+# (many images have no pip, and newer Debian/Ubuntu refuse pip --user).
+if [ "${SKIP_PIP:-0}" != "1" ] && ! python3 -c "import requests" >/dev/null 2>&1; then
+    if ! python3 -m pip install --user -r agent/requirements.txt; then
+        echo "FlowBench needs the Python package requests. Install it, for example with" >&2
+        echo "  sudo apt install python3-requests   (Debian/Ubuntu)" >&2
+        echo "  sudo dnf install python3-requests   (RHEL/Rocky/Fedora)" >&2
+        echo "then run this script again." >&2
+        exit 1
+    fi
 fi
 export PYTHONUNBUFFERED=1
 python3 hub/hub.py --config hub/hub.json --host 0.0.0.0 --port __FLOWBENCH_PORT__ --certfile hub/cert.pem --keyfile hub/key.pem --wait-ready 1 &

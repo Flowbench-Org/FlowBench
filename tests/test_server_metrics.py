@@ -478,6 +478,20 @@ class NodeBundleTests(unittest.TestCase):
         view._generate_all_in_one_package("node", "203.0.113.5", 8787, out)
         self.check_bundle(out, "linux/agent/")
 
+    def test_all_in_one_start_script_runs_pip_only_when_requests_is_missing(self):
+        # Many server images have no pip and newer Debian/Ubuntu refuse
+        # pip --user; an unconditional pip under set -e stopped the script
+        # before the Hub started, though the agent needs only requests.
+        view, folder = self.make_view()
+        out = folder / "all.zip"
+        view._generate_all_in_one_package("node", "203.0.113.5", 8787, out)
+        with zipfile.ZipFile(out) as bundle:
+            script = bundle.read("linux/start-all.sh").decode("utf-8")
+        guard = script.index('! python3 -c "import requests"')
+        self.assertLess(guard, script.index("python3 -m pip install"))
+        self.assertLess(script.index("python3 -m pip install"), script.index("python3 hub/hub.py"))
+        self.assertIn("sudo apt install python3-requests", script)
+
     def test_hub_bundle(self):
         view, folder = self.make_view()
         view.hubEdit.setText("https://hub.example.com")
