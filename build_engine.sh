@@ -13,5 +13,9 @@ if ! command -v cargo >/dev/null 2>&1; then
     exit 1
 fi
 
-cargo build --release --manifest-path engine/Cargo.toml
+# An explicit --target-dir keeps the binary where the specs look for it even
+# when CARGO_TARGET_DIR or build.target-dir points elsewhere. Remove the old
+# binary first, so a failed build cannot leave a stale one to be bundled.
+rm -f engine/target/release/flowbench-engine
+cargo build --release --manifest-path engine/Cargo.toml --target-dir engine/target
 echo "Native engine built at engine/target/release/flowbench-engine"
