@@ -390,6 +390,29 @@ fn http_request_bytes(cfg: &JobConfig) -> u64 {
     (total + 2) as u64 // the blank line that ends the request head
 }
 
+/// True when `url`'s host is `target` as the sending side parses it. Python's
+/// gates check the host with urlsplit, which reads some URLs differently, e.g.
+/// `http://other:80\@allowed/` is "allowed" to urlsplit but is sent to
+/// "other". Refusing on any disagreement keeps load on the authorized host.
+fn url_host_matches(url: &str, target: &str) -> bool {
+    let target = target.trim().trim_start_matches('[').trim_end_matches(']');
+    if target.is_empty() || target.contains(['/', '\\', '@', '?', '#']) {
+        return false;
+    }
+    let target_url = if target.contains(':') {
+        format!("http://[{target}]/")
+    } else {
+        format!("http://{target}/")
+    };
+    match (reqwest::Url::parse(url), reqwest::Url::parse(&target_url)) {
+        (Ok(a), Ok(b)) => match (a.host_str(), b.host_str()) {
+            (Some(x), Some(y)) => !x.is_empty() && x.trim_end_matches('.') == y.trim_end_matches('.'),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
 async fn do_request(
     client: &reqwest::Client,
     cfg: &JobConfig,
@@ -516,6 +539,10 @@ async fn run_job(cfg: JobConfig, stop: Arc<AtomicBool>, out: Out) {
     // engine still refuses to run without a concrete target.
     if cfg.target.trim().is_empty() {
         emit(&out, &Event::Error { message: "job has no target".into() }).await;
+        return;
+    }
+    if matches!(cfg.protocol.as_str(), "HTTP" | "HTTPS") && !url_host_matches(&cfg.url, &cfg.target) {
+        emit(&out, &Event::Error { message: "url host does not match the job target".into() }).await;
         return;
     }
     let threads = cfg.threads.max(1);

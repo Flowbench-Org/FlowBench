@@ -113,8 +113,18 @@ class HubClient:
         return self._request("POST", f"/v1/agents/{self.agent_id}/events", payload)
 
 
+def _ambiguous_url(raw: str) -> bool:
+    """A backslash or control character makes urlsplit and the parsers that
+    actually send (WHATWG in the native engine, urllib3) disagree on where the
+    host ends: ``http://other:80\\@allowed/`` is "allowed" to urlsplit but is
+    sent to "other". Such input is refused instead of being guessed at."""
+    return any(ch == "\\" or ord(ch) < 0x20 or ord(ch) == 0x7F for ch in raw)
+
+
 def _host_from_target(value: str) -> str:
     raw = str(value or "").strip()
+    if _ambiguous_url(raw):
+        return ""
     parsed = urlsplit(raw if "://" in raw else f"//{raw}")
     return (parsed.hostname or "").rstrip(".").lower()
 

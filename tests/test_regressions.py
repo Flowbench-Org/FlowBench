@@ -7,7 +7,7 @@ os.environ.setdefault("APPDATA", os.path.join(tempfile.gettempdir(), "FlowBench-
 
 from PySide6.QtWidgets import QApplication
 
-from app.services.auth import build_http_url
+from app.services.auth import build_http_url, normalize_host
 from app.services.stress import StressEngine
 from app.ui.busy_overlay import BusyOverlay
 from server_agent import validate_job
@@ -23,6 +23,13 @@ class RegressionTests(unittest.TestCase):
             build_http_url("http://example.test/health?q=1", "example.test", 443, "HTTPS"),
             "https://example.test/health?q=1",
         )
+
+    def test_targets_that_parsers_read_differently_are_refused(self):
+        # urlsplit takes example.test as the host; the engines would send to 127.0.0.2.
+        self.assertEqual(normalize_host("http://127.0.0.2:8080\\@example.test/"), "")
+        self.assertEqual(normalize_host("exam\tple.test"), "")
+        self.assertEqual(normalize_host("example.test\x00"), "")
+        self.assertEqual(normalize_host("http://example.test:8080/a?b=c"), "example.test")
 
     def test_stress_engine_rejects_invalid_or_non_finite_config(self):
         engine = StressEngine()

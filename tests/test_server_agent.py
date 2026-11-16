@@ -33,6 +33,15 @@ class AgentValidationTests(unittest.TestCase):
         self.assertEqual(job["target"], "example.test")
         self.assertEqual(job["protocol"], "HTTPS")
 
+    def test_url_that_parsers_read_differently_is_refused(self):
+        # urlsplit takes example.test as the host of the first URL, but the
+        # native engine and urllib3 would send it to 127.0.0.2.
+        for url in ("http://127.0.0.2:8080\\@example.test/", "http://exam\tple.test/",
+                    "http://example.test/\x00"):
+            with self.assertRaises(ValueError, msg=repr(url)):
+                validate_job({"target": "example.test", "protocol": "HTTP", "url": url,
+                              "rate": 5, "duration": 10, "threads": 2}, self.config)
+
     def test_target_and_limits_are_enforced(self):
         with self.assertRaises(ValueError):
             validate_job({"target": "not-allowed.test", "protocol": "HTTP"}, self.config)
