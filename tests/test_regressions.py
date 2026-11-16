@@ -2,6 +2,7 @@ import os
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("APPDATA", os.path.join(tempfile.gettempdir(), "FlowBench-regression-tests"))
@@ -53,6 +54,19 @@ class RegressionTests(unittest.TestCase):
         self.assertGreater(reports[0]["total"], 0)
         self.assertEqual(reports[0]["success"], reports[0]["total"])   # a 302 is below 400
         self.assertEqual(elsewhere.connections, 0, "the load followed the redirect")
+
+    def test_first_snapshot_hides_the_starting_overlay_with_nothing_in_flight(self):
+        # The native engine's "active" counts in-flight requests, often 0 on a
+        # fast target; the overlay used to stay up until its 5 s safety timer.
+        from app.ui.collab_view import CollabView
+        from app.ui.stress_view import StressView
+        snap = {"total": 5, "success": 5, "fail": 0, "tx": 10, "qps": 5.0, "avg": 1.0,
+                "active": 0, "progress": 0.1, "last_error": ""}
+        for method in (StressView._on_snapshot, CollabView._on_local_snapshot):
+            view = mock.MagicMock()
+            view._startup_busy = True
+            method(view, dict(snap))
+            view._hide_startup_busy.assert_called_once_with()
 
     def test_stress_engine_rejects_invalid_or_non_finite_config(self):
         engine = StressEngine()
