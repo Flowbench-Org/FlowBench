@@ -209,7 +209,12 @@ class EngineDiscoveryTests(unittest.TestCase):
             self.assertEqual(find_engine_binary({}), path.name)
 
     def test_missing_binary_returns_none(self):
-        with mock.patch.dict(os.environ, {}, clear=True):
+        # Search a checkout where nothing is built: an engine built in this
+        # one (engine/target/release) must not answer for a missing binary.
+        with tempfile.TemporaryDirectory() as empty, \
+             mock.patch.dict(os.environ, {}, clear=True), \
+             mock.patch.object(engine_bridge, "__file__",
+                               os.path.join(empty, "agent", "engine_bridge.py")):
             self.assertIsNone(find_engine_binary({"engine_path": "/no/such/engine"}))
 
 
