@@ -15,16 +15,18 @@ the Python agent drives over stdin/stdout; the wire protocol is documented in
 
 ## Build
 
-Needs a stable Rust toolchain (<https://rustup.rs>). Build on the same OS you
-ship for; for the Windows release just build on Windows:
+Needs a stable Rust toolchain, 1.83 or newer (<https://rustup.rs>). Build on the
+same OS you ship for; for the Windows release just build on Windows:
 
 ```
-cargo build --release --manifest-path engine/Cargo.toml
+cargo build --release --manifest-path engine/Cargo.toml --target-dir engine/target
 ```
 
 The binary lands at `engine/target/release/flowbench-engine` (`.exe` on
 Windows). `build_engine.ps1` wraps this and copies the binary to the repo root
-as `flowbench-engine.exe` so PyInstaller can bundle it.
+as `flowbench-engine.exe` so PyInstaller can bundle it; `build_engine.sh` is the
+Linux wrapper. `Cargo.lock` is committed, so builds use the tested dependency
+versions.
 
 ## Run standalone (for debugging)
 

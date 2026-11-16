@@ -62,12 +62,39 @@ per job on the Python side).
 
 `snapshot` and `report` carry exactly the keys the Python callbacks
 (`AgentRuntime._on_snapshot` / `_on_report`) already consume, so the native
-engine drops into the same aggregator. A few semantics still differ from the
-Python worker: `active` is the number of in-flight requests (not live threads),
-redirects are not followed and no proxy is used, and on the desktop TCP stays on
-the Python engine (its per-thread connection reuse avoids port exhaustion at high
-QPS). `protocol` in `hello` is the version of this contract; the bridge refuses an
-engine whose number it does not know.
+engine drops into the same aggregator. In `auto` mode either engine may run a
+job, so the numbers mean the same thing in both:
+
+- **Timeouts.** `timeout` is a connect timeout plus a per-read timeout, as in
+  `requests`. A response that keeps arriving is not cut off; one that stalls
+  for `timeout` fails.
+- **Success.** An HTTP request succeeds when its status is below 400 *and* the
+  whole body arrived; a truncated, reset or stalled body is a failure. A TCP
+  request succeeds once the payload is sent and the reply read does not fail:
+  a reply, EOF, or silence until the timeout all count, a reset does not.
+- **Rate.** The token bucket starts with one token, so the first second does
+  not burst past the authorized rate.
+- **Host.** Redirects are never followed and no proxy is used, in either engine,
+  so the load stays on the authorized host. As a second check the engine refuses
+  an HTTP job whose URL host, read by its own URL parser, is not the job's
+  `target`; the Python gates refuse URLs with a backslash or control character,
+  which parsers read differently.
+- **`bytes_tx`.** For HTTP, the bytes of the request head on the wire (request
+  line, Host / user-agent / accept / authorization and the job's headers). TLS
+  overhead is not counted.
+- **End of the run.** The test window ends at the deadline, or within about
+  100 ms of a stop; that is the reported `duration`. In-flight requests then
+  get up to 2 s to finish and count; the rest are dropped uncounted (the Python
+  engines stop waiting after a similar 1.5–2.5 s).
+
+Two differences remain: `active` is the number of in-flight requests (not live
+threads), and on the desktop TCP stays on the Python engine (its per-thread
+connection reuse avoids port exhaustion at high QPS).
+
+If the engine exits without a report (crash, OOM killer, antivirus), the bridge
+reports the job as failed, with `errors: {"engine": 1}` and the totals of the
+last snapshot. `protocol` in `hello` is the version of this contract; the bridge
+refuses an engine whose number it does not know.
 
 ## Choosing the engine
 
@@ -98,6 +125,12 @@ The engine is a compiled binary, so it is per-OS/arch:
   (`agent_template/linux`), and the node-bundle generator ships it beside
   `server_agent.py` in every generated Linux bundle. Set `FLOWBENCH_LINUX_ENGINE`
   to override the path.
+
+`build_engine.ps1` / `build_engine.sh` always build into `engine/target` (whatever
+`CARGO_TARGET_DIR` says) and delete the previous binary first, so a failed build
+never leaves a stale engine to be bundled. `engine/Cargo.lock` is committed, so
+every build uses the dependency versions that were tested; it needs Rust 1.83 or
+newer.
 
 A node whose CPU/libc do not match the binary simply falls back to the Python
 worker (in the default `auto` mode), so a mismatched or missing binary is never
