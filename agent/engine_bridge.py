@@ -150,6 +150,7 @@ class RustStressJob:
         self._lock = threading.Lock()
         self._hello = threading.Event()
         self._hello_ok = False
+        self._last_snapshot = None
 
     def start(self):
         if not self.binary:
@@ -198,8 +199,16 @@ class RustStressJob:
             self.proc.stdin.flush()
         except (OSError, ValueError):
             with self._lock:
-                self._job_sent = False
-                self._reported = True  # suppress a synthesized report
+                already_reported = self._reported
+                if not already_reported:
+                    self._job_sent = False
+                    self._reported = True  # suppress a synthesized report
+            if already_reported:
+                # The engine died the instant it got the job, and the reader
+                # has already reported it as failed. The job ran and its one
+                # report is out: falling back now would run it a second time,
+                # with nothing left that can stop it.
+                return True
             self.running = False
             self._terminate()
             return False
@@ -240,6 +249,7 @@ class RustStressJob:
                     if self._reported:
                         continue  # ignore a snapshot that trails the report
                     message.pop("type", None)
+                    self._last_snapshot = dict(message)
                     self.on_snapshot(message)
                 elif kind == "report":
                     message.pop("type", None)
@@ -285,20 +295,39 @@ class RustStressJob:
         self.on_report(report)
 
     def _error_report(self, message):
+        """A failed report for a job the engine did not finish. It keeps what
+        the last snapshot had counted, so an engine killed part-way (OOM
+        killer, antivirus) does not report a run that sent nothing."""
         cfg = self.config or {}
+        snap = self._last_snapshot or {}
+
+        def _count(key):
+            value = snap.get(key)
+            if isinstance(value, bool) or not isinstance(value, int):
+                return 0
+            return max(0, value)
+
+        def _real(value):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return 0.0
+            value = float(value)
+            return value if math.isfinite(value) and value >= 0 else 0.0
+
+        tx = _count("tx")
+        duration = min(1.0, _real(snap.get("progress"))) * _real(cfg.get("duration"))
         return {
             "target": cfg.get("target", ""),
             "protocol": cfg.get("protocol", ""),
-            "duration": 0.0,
-            "total": 0,
-            "success": 0,
-            "fail": 0,
-            "avg": 0.0,
+            "duration": duration,
+            "total": _count("total"),
+            "success": _count("success"),
+            "fail": _count("fail"),
+            "avg": _real(snap.get("avg")),
             "p50": 0.0,
             "p90": 0.0,
             "p99": 0.0,
-            "traffic_mb": 0.0,
-            "bytes_tx": 0,
+            "traffic_mb": tx / 1024 / 1024,
+            "bytes_tx": tx,
             "rate_limit": cfg.get("rate", 0),
             "errors": {"engine": 1},
             "engine_error": str(message),

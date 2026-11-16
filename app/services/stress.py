@@ -588,7 +588,9 @@ class _AdaptiveStressEngine(QObject):
         if not job.start():
             return False
         self._job = job
-        self.running = True
+        # The job may already have reported (an engine that died right after
+        # taking it), and that report cleared running; do not set it back.
+        self.running = bool(job.running)
         # Emit ready after start() returns, on the GUI thread, so the parent has
         # finished registering this child (mirrors StressEngine's async ready).
         QTimer.singleShot(0, self.ready.emit)

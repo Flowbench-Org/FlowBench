@@ -72,6 +72,24 @@ while sys.stdin.readline() != "":
     pass
 '''
 
+SNAPSHOT_THEN_CRASH_ENGINE = r'''
+import json, sys
+def emit(o):
+    sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+emit({"type": "hello", "engine": "fake", "version": "1", "protocol": 1})
+sys.stdin.readline()
+emit({"type": "snapshot", "running": True, "total": 40, "success": 38, "fail": 2,
+      "tx": 4000, "qps": 20.0, "avg": 3.5, "active": 2, "progress": 0.5, "last_error": "timeout"})
+# ...then die without a report, as when the OOM killer or antivirus kills it.
+'''
+
+DIES_RIGHT_AFTER_HELLO_ENGINE = r'''
+import json, sys, time
+sys.stdout.write(json.dumps({"type": "hello", "engine": "fake", "version": "1", "protocol": 1}) + "\n")
+sys.stdout.flush()
+time.sleep(0.5)   # die before reading the start line
+'''
+
 _real_popen = subprocess.Popen
 
 
@@ -169,6 +187,18 @@ class RustStressJobTests(unittest.TestCase):
         self.assertIn("engine_error", reports[0])
         self.assertFalse(job.running)
 
+    def test_crash_report_keeps_what_the_last_snapshot_counted(self):
+        job, started, snaps, reports, done = self._run(
+            SNAPSHOT_THEN_CRASH_ENGINE,
+            {"target": "example.test", "protocol": "HTTP", "rate": 5, "duration": 10})
+        self.assertTrue(started)
+        self.assertTrue(done.wait(timeout=10), "no synthesized report")
+        report = reports[0]
+        self.assertEqual((report["total"], report["success"], report["fail"]), (40, 38, 2))
+        self.assertEqual(report["bytes_tx"], 4000)
+        self.assertAlmostEqual(report["duration"], 5.0)
+        self.assertEqual(report["errors"], {"engine": 1})
+
 
 class EngineDiscoveryTests(unittest.TestCase):
     def test_env_override_wins(self):
@@ -227,6 +257,57 @@ class EngineSelectionTests(unittest.TestCase):
                                   lambda d: None, lambda d: None, {"engine": "auto"})
             self.assertTrue(job.start())
             self.assertIsInstance(job._impl, _DummyWorker)
+
+    def test_engine_dying_as_it_takes_the_job_reports_once_and_never_falls_back(self):
+        """The reader reports the dead engine's job while start() is still
+        writing the start line. start() must not then fall back and run the
+        job a second time, unowned and unstoppable."""
+        reports, python_jobs = [], []
+
+        class _FailingStdin:
+            def __init__(self, real):
+                self.real = real
+
+            @property
+            def closed(self):
+                return self.real.closed
+
+            def write(self, data):
+                # Hold the write until the reader has seen the engine exit and
+                # reported the job, then fail like the closed pipe does.
+                deadline = time.time() + 10
+                while not reports and time.time() < deadline:
+                    time.sleep(0.02)
+                raise ValueError("I/O operation on closed file")
+
+            def flush(self):
+                pass
+
+            def close(self):
+                self.real.close()
+
+        def popen(args, **kwargs):
+            proc = _py_popen(args, **kwargs)
+            proc.stdin = _FailingStdin(proc.stdin)
+            return proc
+
+        class _RecordingWorker(_DummyWorker):
+            def start(self):
+                python_jobs.append(self)
+                return super().start()
+
+        dying = self._script(DIES_RIGHT_AFTER_HELLO_ENGINE)
+        with mock.patch.object(engine_bridge.subprocess, "Popen", popen), \
+             mock.patch.object(engine_bridge, "find_engine_binary", return_value=dying), \
+             mock.patch.object(engine_bridge, "HeadlessStressJob", _RecordingWorker):
+            job = make_stress_job({"target": "example.test", "protocol": "HTTP", "rate": 5},
+                                  lambda d: None, reports.append, {"engine": "auto"})
+            self.assertTrue(job.start())
+        self.assertEqual(python_jobs, [], "fell back to Python after the job was reported")
+        self.assertEqual(len(reports), 1)
+        self.assertEqual(reports[0]["errors"], {"engine": 1})
+        self.assertIsInstance(job._impl, RustStressJob)
+        self.assertFalse(job.running)
 
 
 class EngineJobSanitizerTests(unittest.TestCase):
