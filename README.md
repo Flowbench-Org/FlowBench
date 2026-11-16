@@ -29,7 +29,14 @@ FlowBench is a Windows desktop application for network stress testing and perfor
 | 🤝 **Collaborative Test** | Host / node modes, one-click invite code copy, IPv4+IPv6 dual-stack listening, UPnP automatic port mapping (Internet collaboration supported) |
 | 🧩 **Plugin System** | Full plugin platform: local plugin management (enable/disable/reload), **built-in plugin marketplace**, one-click install & update, custom icons, and **one-click publish/unpublish to GitHub** — no manual token required |
 | 📈 **Monitoring** | Real-time CPU / memory / network speed curves for this PC or any server agent (switch under **Source**), smooth animated wheel zoom on the time axis, drag to pan when zoomed, double-click to resume live scrolling |
-| ⚙️ **Settings** | Dark / light theme, Chinese-English language selection (restart to fully apply), default parameters, audit log export |
+| ⚙️ **Settings** | Dark / light theme, Chinese-English language selection (restart to fully apply), load-engine selection, default parameters, audit log export |
+
+### Native Rust Engine
+
+- **Local tests**: select **Auto (recommended)**, **Native engine (Rust)** or **Python engine** in Settings. Rust supports local HTTP/HTTPS tests; TCP, UDP, ICMP and plugin protocols use Python. The status line shows whether the native binary was found. Changes apply to the next test.
+- **Server nodes**: HTTP, HTTPS and TCP can use Rust. Each node reads its own `engine` setting in `agent.json`: `auto` (the default, including when omitted), `rust` or `python`. The desktop selector only affects local tests. `auto` falls back to Python when the native engine is missing or cannot start; `rust` requires it.
+- **Release packages**: the Windows desktop app and Agent include the Windows engine. Generated Linux node bundles include an x86-64 engine built against glibc 2.17; ARM and musl nodes use Python in `auto` mode. No Rust toolchain is needed on the machine running a release package. Regenerate and redeploy node bundles to update existing servers.
+- Authorization, target/protocol checks and node limits run before either engine starts. See [`ENGINE.md`](ENGINE.md) for the protocol, binary lookup order and shared request behavior, and [`engine/prebuilt/README.md`](engine/prebuilt/README.md) for rebuilding the Linux binary.
 
 ### Security & Compliance
 
@@ -87,11 +94,16 @@ One step (stops at the first failure and prints the installer path):
 
 ```bash
 powershell -ExecutionPolicy Bypass -File build_installer.ps1
-# Output: installer/FlowBench-Setup-1.2.15.exe
+# Output: installer/FlowBench-Setup-1.2.17.exe
 ```
 
-Only Python and PyInstaller are needed; the installer is FlowBench's own (`flowbench_installer/`),
-so Inno Setup is no longer required. Or step by step:
+Python, the packages in `requirements.txt` and PyInstaller build the application and its own
+installer (`flowbench_installer/`); Inno Setup is no longer required. Rust 1.83 or newer is optional:
+when Cargo is available, `build_agent.ps1` also builds the Windows native engine. Without Cargo,
+an existing `flowbench-engine.exe` at the repository root or under `engine/target/release/` is
+bundled; when none exists, Windows tests use Python in `auto` mode. The committed Linux x86-64
+prebuilt is included in generated Linux node bundles even when building on Windows. See
+[`ENGINE.md`](ENGINE.md) for native-engine build details. Or build step by step:
 
 ```bash
 # 1. Build the server utilities and GUI with all icon/logo resources
@@ -101,7 +113,7 @@ powershell -File build_all.ps1
 python -m PyInstaller --clean --noconfirm Uninstall.spec
 python tools/make_payload.py
 python -m PyInstaller --clean --noconfirm Setup.spec
-# Output: dist/FlowBench-Setup-1.2.15.exe
+# Output: dist/FlowBench-Setup-1.2.17.exe
 ```
 
 To publish, upload `FlowBench-Setup-<version>.exe` to the GitHub release under exactly that
@@ -117,6 +129,7 @@ according to the saved theme (light by default). Both PNGs are bundled by `FlowB
 - **Charts**: PySide6 QtCharts (native real-time curves)
 - **System monitoring**: psutil
 - **Networking**: requests / socket / icmplib
+- **Native load engine**: Rust + Tokio + reqwest (HTTP/HTTPS locally; HTTP/HTTPS/TCP on server nodes)
 - **Rate limiting**: custom token-bucket algorithm
 - **Storage**: JSON (`%APPDATA%\FlowBench`)
 - **Packaging**: PyInstaller + FlowBench's own installer (`flowbench_installer/`)
@@ -140,7 +153,14 @@ FlowBench 是一款 Windows 桌面端的网络压力测试与性能监控工具�
 | 🤝 **协同测试** | 主控邀请 / 节点加入模式，邀请码一键复制，IPv4+IPv6 双栈监听，UPnP 自动端口映射（支持外网协同） |
 | 🧩 **插件系统** | 完整插件平台：本地插件管理（启用/禁用/重载）、**内置插件市场**、一键安装与更新、自定义图标、**一键发布/下架到 GitHub** —— 无需手动生成令牌 |
 | 📈 **性能监控** | 本机或任一服务器节点的 CPU / 内存 / 网速实时曲线（在“监控对象”里切换），鼠标滚轮带动画平滑缩放时间段，放大后可左右拖动，双击恢复实时滚动 |
-| ⚙️ **设置** | 深色 / 浅色主题，中英双语选择（重启后完整生效），默认参数配置，审计日志导出 |
+| ⚙️ **设置** | 深色 / 浅色主题，中英双语选择（重启后完整生效），压测引擎选择，默认参数配置，审计日志导出 |
+
+### Rust 原生引擎
+
+- **本机压测**：在设置中选择“自动（推荐）”“原生引擎（Rust）”或“Python 引擎”。本机 HTTP/HTTPS 支持 Rust；TCP、UDP、ICMP 和插件协议使用 Python。状态行会显示是否找到了原生引擎，选择从下一次压测开始生效。
+- **服务器节点**：HTTP、HTTPS、TCP 均可使用 Rust。各节点独立读取 `agent.json` 的 `engine`：`auto`（默认，未写也按此值）、`rust` 或 `python`。桌面设置页的选择只影响本机。`auto` 在原生引擎缺失或无法启动时回退 Python；`rust` 则必须使用原生引擎。
+- **发布包**：Windows 主程序和 Agent 已包含 Windows 引擎；生成的 Linux 节点包包含按 glibc 2.17 构建的 x86-64 引擎，ARM 和 musl 节点在 `auto` 模式下使用 Python。运行发布包无需安装 Rust 工具链。现有服务器需要重新生成并部署节点包才能更新。
+- 授权、目标与协议检查、节点上限均在启动引擎前执行。协议、引擎查找顺序和两套引擎的请求行为见 [`ENGINE.md`](ENGINE.md)，Linux 二进制的重编方式见 [`engine/prebuilt/README.md`](engine/prebuilt/README.md)。
 
 ### 安全与合规设计
 
@@ -195,11 +215,16 @@ python main.py
 
 ```bash
 powershell -ExecutionPolicy Bypass -File build_installer.ps1
-# 产物位于 installer/FlowBench-Setup-1.2.15.exe
+# 产物位于 installer/FlowBench-Setup-1.2.17.exe
 ```
 
-只需要 Python 和 PyInstaller。安装程序是 FlowBench 自己的（`flowbench_installer/`），
-不再需要 Inno Setup。也可以分步执行：
+Python、`requirements.txt` 中的依赖和 PyInstaller 即可构建应用与自带安装程序
+（`flowbench_installer/`），不再需要 Inno Setup。Rust 1.83 或更新版本为可选依赖：
+检测到 Cargo 时，`build_agent.ps1` 会先编译 Windows 原生引擎；没有 Cargo 时，
+会打入仓库根目录或 `engine/target/release/` 下已有的 `flowbench-engine.exe`，
+两处都没有时 Windows 压测在 `auto` 模式下使用 Python。仓库已带 Linux x86-64 预编译引擎，
+在 Windows 上构建也会带进生成的 Linux 节点包。原生引擎构建说明见 [`ENGINE.md`](ENGINE.md)。
+也可以分步执行：
 
 ```bash
 # 1. 生成服务器工具与主程序，包含全部图标和启动图资源
@@ -209,7 +234,7 @@ powershell -File build_all.ps1
 python -m PyInstaller --clean --noconfirm Uninstall.spec
 python tools/make_payload.py
 python -m PyInstaller --clean --noconfirm Setup.spec
-# 产物位于 dist/FlowBench-Setup-1.2.15.exe
+# 产物位于 dist/FlowBench-Setup-1.2.17.exe
 ```
 
 发布时把 `FlowBench-Setup-<版本号>.exe` 原名上传到 GitHub Release，软件内更新按这个文件名查找。
@@ -224,6 +249,7 @@ python -m PyInstaller --clean --noconfirm Setup.spec
 - **图表**：PySide6 QtCharts（原生实时曲线）
 - **系统监控**：psutil
 - **网络**：requests / socket / icmplib
+- **原生压测引擎**：Rust + Tokio + reqwest（本机 HTTP/HTTPS，服务器节点 HTTP/HTTPS/TCP）
 - **限速**：自研令牌桶算法
 - **存储**：JSON（`%APPDATA%\FlowBench`）
 - **打包**：PyInstaller + FlowBench 自带安装程序（`flowbench_installer/`）

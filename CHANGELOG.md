@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.2.17] - 2026-11-16
+
+### Added
+
+- Native Rust load engine 0.1.0, controlled by the Python application over a versioned stdin/stdout JSON protocol. Desktop HTTP/HTTPS tests can use it; desktop TCP, UDP, ICMP and plugin protocols continue to use Python. Server agents can use the native engine for HTTP, HTTPS and TCP, with authorization, protocol checks and node limits still enforced by Python before a job starts.
+- Settings now offers **Auto (recommended)**, **Native engine (Rust)** and **Python engine**, with a status line showing whether a native binary was found. The choice applies to the next local HTTP/HTTPS test and is included in preference backups and resets. Server agents choose independently through `engine` in `agent.json` (`auto` when omitted).
+- Windows builds embed the native engine in the desktop app and `FlowBench-Agent.exe`. Generated Linux node bundles include a prebuilt x86-64 engine targeting glibc 2.17; unsupported CPU/libc combinations use the Python worker in `auto` mode. The committed source hash and tests detect an outdated Linux prebuilt after engine source changes.
+
+### Fixed
+
+- Native and Python workers now share request behavior: redirects and environment proxies are disabled, ambiguous or mismatched URL hosts are refused, HTTP success requires the complete response body, timeouts apply to connection and individual reads, and the rate bucket starts with one token. TCP resets count as failures, stopping remains prompt, and HTTP transmitted-byte totals count the request head.
+- The engine bridge validates its handshake and job fields, reaps child processes and closes pipes, stops the engine when its controlling input closes, and reports the last snapshot totals if the engine exits without a report. A job is never repeated through the Python fallback after the native engine has accepted it. Desktop tests discard stale multi-target signals and hide the starting overlay on the first snapshot.
+- Setup/update and uninstall progress lines keep their fixed words intact, shorten only the file name and wrap when needed. Server Nodes ignores an asynchronous result that arrives after the page has been destroyed.
+- Tests use temporary `APPDATA` and `LOCALAPPDATA` directories on Windows instead of the real FlowBench profile. Missing-engine tests use an empty directory so local compiler output cannot change their result. Japanese language pack 1.0.12 translates the engine settings.
+
+### Verified
+
+- Windows test suite: 359 passed, 2 Linux-only tests skipped, and 1962 subtests passed; all 9 real Windows Rust-engine integration tests passed.
+- Rebuilt the Windows server utilities, desktop app, uninstaller and installer. Checked all 318 files in the installer's actual payload, the embedded Windows and Linux engines, and all three generated node-bundle types including Linux executable permissions.
+- The frozen Windows Agent completed a loopback job using its embedded Rust engine. The desktop app and installer passed isolated startup checks. A full installation/uninstallation and deployment to servers were not performed in this build verification.
+
 ## [1.2.15] - 2026-11-15
 
 ### Added
