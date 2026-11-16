@@ -1081,8 +1081,10 @@ class StressView(ScrollArea):
                  for t in d.get("targets", [])]
         self.targetsLabel.setText("  |  ".join(parts))
 
-        # worker线程真正跑起来了（有活跃线程），隐藏启动遮罩
-        if self._startup_busy and active > 0:
+        # 收到第一份快照即说明引擎已在运行，隐藏启动遮罩。不能看 active > 0：
+        # 原生引擎的 active 是在途请求数，目标响应快时常为 0，遮罩会一直挡到
+        # 5 秒安全超时（短测试整程被挡住，期间点不了停止）。
+        if self._startup_busy:
             self._hide_startup_busy()
 
     def _on_report(self, r):

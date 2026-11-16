@@ -1,6 +1,25 @@
 # -*- mode: python ; coding: utf-8 -*-
 # FlowBench 打包配置（onedir 模式，再由 tools/make_payload.py 和 Setup.spec 打成自带的安装程序）：
 import os
+import sys
+
+# Optionally embed a prebuilt Linux native engine so generated node bundles
+# can ship it to Linux servers. Build it (cargo build --release, on Linux or
+# via cross) and leave the binary at engine/target/release/flowbench-engine,
+# or set FLOWBENCH_LINUX_ENGINE. When absent, Linux nodes run the Python
+# worker exactly as before.
+_linux_engine = os.environ.get('FLOWBENCH_LINUX_ENGINE') or 'engine/target/release/flowbench-engine'
+_engine_datas = [(_linux_engine, 'agent_template/linux')] if os.path.isfile(_linux_engine) else []
+
+# Bundle the native engine beside the desktop app for its own local stress
+# runs (HTTP/HTTPS/TCP). Staged by build_engine.ps1 (repo root) or build_engine.sh
+# (engine/target/release). Absent, local runs use the Python engine.
+_desktop_engine = []
+_engine_name = 'flowbench-engine.exe' if sys.platform.startswith('win') else 'flowbench-engine'
+for _cand in (_engine_name, os.path.join('engine', 'target', 'release', _engine_name)):
+    if os.path.isfile(_cand):
+        _desktop_engine = [(_cand, '.')]
+        break
 
 # 排除环境中无关的可编辑安装包（phantom_backend 等），
 # 避免把 torch/scipy 等巨型依赖拖进 exe。
@@ -8,7 +27,7 @@ import os
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[],
+    binaries=_desktop_engine,
     datas=[
         ('app.ico', '.'),
         ('app_logo.png', '.'),
@@ -19,12 +38,14 @@ a = Analysis(
         ('server_agent.py', 'agent_template/linux'),
         ('agent/hub.py', 'agent_template/linux/agent'),
         ('agent/worker.py', 'agent_template/linux/agent'),
+        ('agent/engine_bridge.py', 'agent_template/linux/agent'),
         ('agent/transport.py', 'agent_template/linux/agent'),
         ('agent/relay.py', 'agent_template/linux/agent'),
         ('agent/sysmetrics.py', 'agent_template/linux/agent'),
         ('agent/__init__.py', 'agent_template/linux/agent'),
+        *_engine_datas,
     ],
-    hiddenimports=['shiboken6.Shiboken'],
+    hiddenimports=['shiboken6.Shiboken', 'agent.engine_bridge', 'agent.worker'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

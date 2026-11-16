@@ -1,13 +1,15 @@
 import os
 import tempfile
+import time
 import unittest
+from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("APPDATA", os.path.join(tempfile.gettempdir(), "FlowBench-regression-tests"))
 
 from PySide6.QtWidgets import QApplication
 
-from app.services.auth import build_http_url
+from app.services.auth import build_http_url, normalize_host
 from app.services.stress import StressEngine
 from app.ui.busy_overlay import BusyOverlay
 from server_agent import validate_job
@@ -23,6 +25,48 @@ class RegressionTests(unittest.TestCase):
             build_http_url("http://example.test/health?q=1", "example.test", 443, "HTTPS"),
             "https://example.test/health?q=1",
         )
+
+    def test_targets_that_parsers_read_differently_are_refused(self):
+        # urlsplit takes example.test as the host; the engines would send to 127.0.0.2.
+        self.assertEqual(normalize_host("http://127.0.0.2:8080\\@example.test/"), "")
+        self.assertEqual(normalize_host("exam\tple.test"), "")
+        self.assertEqual(normalize_host("example.test\x00"), "")
+        self.assertEqual(normalize_host("http://example.test:8080/a?b=c"), "example.test")
+
+    def test_desktop_engine_does_not_follow_redirects(self):
+        from tests.loopback import LoopbackServer, http_ok, http_redirect
+        elsewhere = LoopbackServer(http_ok)
+        self.addCleanup(elsewhere.close)
+        server = LoopbackServer(http_redirect(f"http://127.0.0.1:{elsewhere.port}/"))
+        self.addCleanup(server.close)
+        engine = StressEngine()
+        reports = []
+        engine.report_ready.connect(reports.append)
+        self.assertTrue(engine.start({
+            "target": "127.0.0.1", "protocol": "HTTP", "port": server.port,
+            "url": f"http://127.0.0.1:{server.port}/", "threads": 2, "rate": 10,
+            "duration": 1, "packet_size": 64, "timeout": 2000}))
+        deadline = time.monotonic() + 15
+        while not reports and time.monotonic() < deadline:
+            self.app.processEvents()
+            time.sleep(0.02)
+        self.assertTrue(reports, "no report")
+        self.assertGreater(reports[0]["total"], 0)
+        self.assertEqual(reports[0]["success"], reports[0]["total"])   # a 302 is below 400
+        self.assertEqual(elsewhere.connections, 0, "the load followed the redirect")
+
+    def test_first_snapshot_hides_the_starting_overlay_with_nothing_in_flight(self):
+        # The native engine's "active" counts in-flight requests, often 0 on a
+        # fast target; the overlay used to stay up until its 5 s safety timer.
+        from app.ui.collab_view import CollabView
+        from app.ui.stress_view import StressView
+        snap = {"total": 5, "success": 5, "fail": 0, "tx": 10, "qps": 5.0, "avg": 1.0,
+                "active": 0, "progress": 0.1, "last_error": ""}
+        for method in (StressView._on_snapshot, CollabView._on_local_snapshot):
+            view = mock.MagicMock()
+            view._startup_busy = True
+            method(view, dict(snap))
+            view._hide_startup_busy.assert_called_once_with()
 
     def test_stress_engine_rejects_invalid_or_non_finite_config(self):
         engine = StressEngine()

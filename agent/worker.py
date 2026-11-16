@@ -52,7 +52,10 @@ class TokenBucket:
     def __init__(self, rate):
         self.rate = max(0.1, float(rate))
         self.capacity = max(1.0, self.rate)
-        self.tokens = self.capacity
+        # Start with one token, not a full bucket: a full bucket let the first
+        # second send the rate *plus* a whole burst, i.e. up to twice the
+        # rate the job was authorized for (the desktop limiter starts at one).
+        self.tokens = min(self.capacity, 1.0)
         self.updated = time.monotonic()
         self.lock = threading.Lock()
 
@@ -116,9 +119,12 @@ class HeadlessStressJob:
         target = self.config["target"]
         port = self.config["port"]
         if proto in {"HTTP", "HTTPS"}:
+            # Never follow a redirect: it can point anywhere, and the load must
+            # stay on the authorized host (the native engine does the same).
             with session.get(self.config["url"], timeout=timeout,
                              headers=self.config.get("headers"),
-                             verify=(proto == "HTTP")) as response:
+                             verify=(proto == "HTTP"),
+                             allow_redirects=False) as response:
                 ok = response.status_code < 400
                 error = None if ok else f"HTTP {response.status_code}"
                 return ok, error, request_bytes(response)
@@ -191,13 +197,21 @@ class HeadlessStressJob:
     def _supervise(self):
         while not self.stop_event.is_set() and time.monotonic() < self.end:
             self.on_snapshot(self._snapshot())
-            time.sleep(0.5)
+            self.stop_event.wait(0.5)  # wakes at once on stop
+        # The test window ends here (or at the planned end); time spent waiting
+        # for in-flight requests is not test time (as in the desktop and native
+        # engines). It used to count, so a stop on a slow target reported a
+        # duration several seconds too long.
+        ended = min(time.monotonic(), self.end)
         self.stop_event.set()
+        # Wait for the workers about 2 s in all, not 1 s each: with many threads
+        # stuck on a slow target, a stop held the report for threads x 1 s.
+        deadline = time.monotonic() + 2.0
         for thread in self.threads:
-            thread.join(timeout=1.0)
+            thread.join(timeout=max(0.0, deadline - time.monotonic()))
         with self.lock:
             lats = list(self.latencies)
-            duration = time.monotonic() - self.t0
+            duration = max(0.0, ended - self.t0)
             report = {
                 "target": self.config["target"], "protocol": self.config["protocol"],
                 "duration": duration, "total": self.total, "success": self.success,

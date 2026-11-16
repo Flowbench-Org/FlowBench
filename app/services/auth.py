@@ -15,6 +15,12 @@ def normalize_host(target: str) -> str:
     t = (target or "").strip()
     if not t:
         return ""
+    # A backslash or control character makes urlsplit and the parsers that
+    # actually send (WHATWG in the native engine, urllib3) disagree on where
+    # the host ends: "http://other:80\@allowed/" is "allowed" to urlsplit
+    # but is sent to "other". Refuse it rather than authorize the wrong host.
+    if any(ch == "\\" or ord(ch) < 0x20 or ord(ch) == 0x7F for ch in t):
+        return ""
 
     has_scheme = bool(re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", t))
     if not has_scheme:

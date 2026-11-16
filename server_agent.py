@@ -25,10 +25,11 @@ from agent.relay import (parse_relay_url, relay_topic, sign_message,
                          verify_message)
 from agent.sysmetrics import SystemSampler
 from agent.transport import compact_json, decode_json, endpoint, number_text
-from agent.worker import HeadlessStressJob
+from agent.engine_bridge import make_stress_job
 
 DEFAULTS = {
     "transport": "http",
+    "engine": "auto",  # auto | rust | python (native load engine, see ENGINE.md)
     "poll_interval": 2.0, "heartbeat_interval": 10.0, "job_heartbeat_interval": 2.0, "request_timeout": 8.0,
     "max_rate": 100.0, "max_duration": 300, "max_threads": 32,
     "max_packet_size": 64 * 1024, "allowed_protocols": ["HTTP", "HTTPS", "TCP"],
@@ -112,8 +113,18 @@ class HubClient:
         return self._request("POST", f"/v1/agents/{self.agent_id}/events", payload)
 
 
+def _ambiguous_url(raw: str) -> bool:
+    """A backslash or control character makes urlsplit and the parsers that
+    actually send (WHATWG in the native engine, urllib3) disagree on where the
+    host ends: ``http://other:80\\@allowed/`` is "allowed" to urlsplit but is
+    sent to "other". Such input is refused instead of being guessed at."""
+    return any(ch == "\\" or ord(ch) < 0x20 or ord(ch) == 0x7F for ch in raw)
+
+
 def _host_from_target(value: str) -> str:
     raw = str(value or "").strip()
+    if _ambiguous_url(raw):
+        return ""
     parsed = urlsplit(raw if "://" in raw else f"//{raw}")
     return (parsed.hostname or "").rstrip(".").lower()
 
@@ -163,6 +174,10 @@ def load_config(path: Path):
     if not isinstance(raw_protocols, (list, tuple, set)):
         raw_protocols = DEFAULTS["allowed_protocols"]
     merged["allowed_protocols"] = [str(x).upper() for x in raw_protocols]
+    engine_mode = str(merged.get("engine") or "auto").strip().lower()
+    if engine_mode not in {"auto", "rust", "python"}:
+        raise ValueError("engine must be auto, rust or python")
+    merged["engine"] = engine_mode
     for key, kind in LIMIT_TYPES.items():
         value = merged.get(key)
         try:
@@ -357,7 +372,7 @@ class AgentRuntime:
         job = validate_job(command.get("config") or {}, self.config)
         self.job_id = str(command.get("job_id") or uuid.uuid4().hex)
         self._set_event({"state": "starting", "job_id": self.job_id, "target": job["target"], "protocol": job["protocol"], "ts": time.time()})
-        self.job = HeadlessStressJob(job, self._on_snapshot, self._on_report)
+        self.job = make_stress_job(job, self._on_snapshot, self._on_report, self.config)
         if not self.job.start():
             self.job = None
             self.job_id = None

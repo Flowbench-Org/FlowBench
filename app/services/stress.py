@@ -255,16 +255,21 @@ class StressEngine(QObject):
             err = None
             nbytes = 0  # 本次请求实际发送的字节数
             try:
+                # Redirects are never followed: they can point anywhere, and
+                # the load must stay on the authorized host (as in the native
+                # engine and the agent worker).
                 if proto == "HTTP":
                     with session.get(c["url"], timeout=timeout,
-                                     headers=c.get("headers")) as r:
+                                     headers=c.get("headers"),
+                                     allow_redirects=False) as r:
                         ok = r.status_code < 400
                         nbytes = _http_req_bytes(r)
                         if not ok:
                             err = f"HTTP {r.status_code}"
                 elif proto == "HTTPS":
                     with session.get(c["url"], timeout=timeout,
-                                     headers=c.get("headers"), verify=False) as r:
+                                     headers=c.get("headers"), verify=False,
+                                     allow_redirects=False) as r:
                         ok = r.status_code < 400
                         nbytes = _http_req_bytes(r)
                         if not ok:
@@ -453,6 +458,183 @@ class StressEngine(QObject):
         return float(sum(b[1] for b in self._buckets))
 
 
+# ---------------------------------------------------------------------------
+# Native (Rust) engine selection for local stress runs
+# ---------------------------------------------------------------------------
+# The native engine (engine/, driven through agent.engine_bridge) runs the hot
+# path for HTTP/HTTPS/TCP targets. UDP, ICMP and plugin protocols stay on the
+# Python StressEngine, and a missing/incompatible binary falls back to it too,
+# so local runs never fail just because the native engine is unavailable.
+
+# Desktop TCP keeps the Python engine: its per-thread connection reuse avoids
+# the port exhaustion a new connection per request would cause at the high QPS
+# the desktop allows. The agent (capped, per-request Python worker) runs TCP
+# natively too.
+NATIVE_PROTOCOLS = {"HTTP", "HTTPS"}
+
+
+def _engine_mode():
+    try:
+        from app.services.settings import settings
+        mode = str(getattr(settings, "engine", "auto") or "auto").strip().lower()
+    except Exception:
+        mode = "auto"
+    return mode if mode in ("auto", "rust", "python") else "auto"
+
+
+def _valid_native_config(config):
+    """The same gate StressEngine.start applies, so the native path only runs a
+    config the Python path would also accept."""
+    if not isinstance(config, dict):
+        return False
+    required = ("target", "protocol", "threads", "rate", "duration",
+                "packet_size", "timeout")
+    if any(key not in config for key in required):
+        return False
+    numeric = ("threads", "rate", "duration", "packet_size", "timeout")
+    if any(isinstance(config[key], bool) for key in numeric):
+        return False
+    try:
+        threads = int(config["threads"])
+        rate = float(config["rate"])
+        duration = float(config["duration"])
+        packet_size = int(config["packet_size"])
+        timeout = float(config["timeout"])
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if (not math.isfinite(rate) or not math.isfinite(duration)
+            or not math.isfinite(timeout) or threads < 1 or rate <= 0
+            or duration <= 0 or packet_size < 1 or timeout <= 0):
+        return False
+    proto = str(config.get("protocol", "")).upper()
+    if proto in ("HTTP", "HTTPS") and not str(config.get("url") or "").strip():
+        return False
+    if proto == "TCP":
+        try:
+            port = int(config.get("port"))
+        except (TypeError, ValueError):
+            return False
+        if not (1 <= port <= 65535):
+            return False
+    return True
+
+
+def _native_config(config):
+    proto = str(config.get("protocol", "")).upper()
+    try:
+        port = int(config.get("port"))
+    except (TypeError, ValueError):
+        port = -1
+    if not (1 <= port <= 65535):
+        port = 443 if proto == "HTTPS" else 80
+    headers = config.get("headers")
+    if not isinstance(headers, dict):
+        headers = None
+    return {
+        "target": str(config.get("target", "")),
+        "protocol": proto,
+        "url": str(config.get("url", "")),
+        "port": port,
+        "rate": float(config["rate"]),
+        "duration": float(config["duration"]),
+        "threads": int(config["threads"]),
+        "packet_size": int(config["packet_size"]),
+        "timeout": int(float(config["timeout"])),
+        "headers": headers,
+    }
+
+
+class _AdaptiveStressEngine(QObject):
+    """Runs one HTTP/HTTPS/TCP target on the native engine, falling back to the
+    in-process Python StressEngine when the binary is missing or fails to start.
+
+    It exposes the same signals and start/stop/config/_idx surface as
+    StressEngine, so MultiStressEngine drives it identically.
+    """
+
+    snapshot = Signal(dict)
+    report_ready = Signal(dict)
+    ready = Signal()
+
+    def __init__(self, require_native=False):
+        super().__init__()
+        self.config = None
+        self.running = False
+        self._idx = 0
+        self._require_native = require_native
+        self._job = None       # RustStressJob when native
+        self._impl = None      # StressEngine when falling back
+
+    def start(self, config) -> bool:
+        if self._job is not None or self._impl is not None:
+            return False
+        self.config = dict(config) if isinstance(config, dict) else config
+        if _valid_native_config(config) and self._start_native(config):
+            return True
+        if self._require_native:
+            return False
+        return self._start_python(config)
+
+    def _start_native(self, config):
+        try:
+            from agent.engine_bridge import RustStressJob, find_engine_binary
+        except Exception:
+            return False
+        binary = find_engine_binary()
+        if not binary:
+            return False
+        job = RustStressJob(_native_config(config), self._on_native_snapshot,
+                            self._on_native_report, binary)
+        if not job.start():
+            return False
+        self._job = job
+        # The job may already have reported (an engine that died right after
+        # taking it), and that report cleared running; do not set it back.
+        self.running = bool(job.running)
+        # Emit ready after start() returns, on the GUI thread, so the parent has
+        # finished registering this child (mirrors StressEngine's async ready).
+        QTimer.singleShot(0, self.ready.emit)
+        return True
+
+    def _start_python(self, config):
+        impl = StressEngine()
+        impl.snapshot.connect(self.snapshot)
+        impl.report_ready.connect(self.report_ready)
+        impl.report_ready.connect(lambda _r: setattr(self, "running", False))
+        impl.ready.connect(self.ready)
+        if impl.start(config):
+            self._impl = impl
+            self.running = True
+            return True
+        return False
+
+    def stop(self):
+        if self._job is not None:
+            self._job.stop()
+        elif self._impl is not None:
+            self._impl.stop()
+
+    def _on_native_snapshot(self, data):
+        self.snapshot.emit(data)
+
+    def _on_native_report(self, data):
+        self.running = False
+        if isinstance(data, dict):
+            data.pop("engine_error", None)
+        self.report_ready.emit(data)
+
+
+def make_child_engine(config):
+    """Pick the engine for one target: native for HTTP/HTTPS/TCP when enabled,
+    otherwise the Python StressEngine (UDP/ICMP/plugin protocols, or the
+    ``python`` engine mode)."""
+    mode = _engine_mode()
+    proto = str((config or {}).get("protocol", "")).upper()
+    if mode != "python" and proto in NATIVE_PROTOCOLS:
+        return _AdaptiveStressEngine(require_native=(mode == "rust"))
+    return StressEngine()
+
+
 class MultiStressEngine(QObject):
     """多目标管理器：每个目标一个独立 StressEngine，聚合实时统计与汇总报告。
 
@@ -494,7 +676,7 @@ class MultiStressEngine(QObject):
         self._expected = len(configs)
         all_ok = False
         for i, c in enumerate(configs):
-            e = StressEngine()
+            e = make_child_engine(c)
             e._idx = i
             e.snapshot.connect(lambda d, e=e: self._on_child_snap(e, d))
             e.report_ready.connect(lambda r, e=e: self._on_child_report(e, r))
@@ -525,6 +707,8 @@ class MultiStressEngine(QObject):
 
     def _on_child_ready(self):
         """每个子引擎 worker 全部启动后调用；全部就绪时 emit started。"""
+        if not self.running:
+            return
         self._ready_count += 1
         if self._ready_count >= len(self._children):
             self.started.emit()
@@ -539,10 +723,12 @@ class MultiStressEngine(QObject):
     # ---------- 内部 ----------
 
     def _on_child_snap(self, child, d):
+        if child not in self._children:
+            return   # a late signal from a previous run
         self._snaps[child._idx] = (d, child.config or {})
 
     def _on_child_report(self, child, r):
-        if not self.running:
+        if not self.running or child not in self._children:
             return
         self._reports[child._idx] = r
         if len(self._reports) >= len(self._children):

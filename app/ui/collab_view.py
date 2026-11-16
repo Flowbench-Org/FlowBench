@@ -846,8 +846,9 @@ class CollabView(ScrollArea):
             "qps": d.get("qps", 0.0),
             "tx": d.get("tx", 0),
         }
-        # worker线程真正跑起来了（有活跃线程），隐藏启动遮罩
-        if self._startup_busy and d.get("active", 0) > 0:
+        # 收到第一份快照即说明引擎已在运行，隐藏启动遮罩（原生引擎的 active 是
+        # 在途请求数，目标响应快时常为 0，不能用来判断是否已启动）。
+        if self._startup_busy:
             self._hide_startup_busy()
 
     def _tick_stats(self):
