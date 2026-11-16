@@ -217,6 +217,37 @@ class EngineDiscoveryTests(unittest.TestCase):
                                os.path.join(empty, "agent", "engine_bridge.py")):
             self.assertIsNone(find_engine_binary({"engine_path": "/no/such/engine"}))
 
+    def _checkout_with_engine(self, checkout, mode):
+        engine = os.path.join(checkout, "flowbench-engine")
+        with open(engine, "wb") as handle:
+            handle.write(b"#!/bin/sh\n")
+        os.chmod(engine, mode)
+        return engine
+
+    @unittest.skipIf(os.name == "nt", "Unix file modes")
+    def test_bundled_engine_gets_back_the_executable_bit_an_unzip_dropped(self):
+        # Python's zipfile, or a Windows extract copied up over SFTP, leaves
+        # the bundled engine 0644; spawning it would fail and auto mode would
+        # quietly run the Python worker.
+        with tempfile.TemporaryDirectory() as checkout:
+            engine = self._checkout_with_engine(checkout, 0o644)
+            with mock.patch.dict(os.environ, {}, clear=True), \
+                 mock.patch.object(engine_bridge, "__file__",
+                                   os.path.join(checkout, "agent", "engine_bridge.py")):
+                self.assertEqual(find_engine_binary({}), engine)
+            self.assertEqual(os.stat(engine).st_mode & 0o777, 0o755)
+
+    @unittest.skipIf(os.name == "nt", "Unix file modes")
+    def test_engine_that_cannot_be_made_executable_is_skipped(self):
+        with tempfile.TemporaryDirectory() as checkout:
+            self._checkout_with_engine(checkout, 0o644)
+            with mock.patch.dict(os.environ, {}, clear=True), \
+                 mock.patch.object(engine_bridge, "__file__",
+                                   os.path.join(checkout, "agent", "engine_bridge.py")), \
+                 mock.patch.object(engine_bridge.os, "chmod",
+                                   side_effect=PermissionError("read-only file system")):
+                self.assertIsNone(find_engine_binary({}))
+
 
 class EngineSelectionTests(unittest.TestCase):
     def _script(self, text):
@@ -234,6 +265,15 @@ class EngineSelectionTests(unittest.TestCase):
             self.assertTrue(job.start())
             self.assertTrue(job.running)
             self.assertIsInstance(job._impl, _DummyWorker)
+            self.assertEqual(job.describe(), "Python worker")
+
+    def test_auto_mode_says_why_it_runs_the_python_worker(self):
+        with mock.patch.object(engine_bridge, "find_engine_binary", return_value=None), \
+             mock.patch.object(engine_bridge, "HeadlessStressJob", _DummyWorker):
+            job = make_stress_job({"target": "x"}, lambda d: None, lambda d: None, {"engine": "auto"})
+            self.assertTrue(job.start())
+            self.assertEqual(job.engine, "python")
+            self.assertEqual(job.describe(), "Python worker; no native engine found")
 
     def test_rust_mode_without_binary_fails_and_does_not_fall_back(self):
         with mock.patch.object(engine_bridge, "find_engine_binary", return_value=None), \
@@ -252,6 +292,8 @@ class EngineSelectionTests(unittest.TestCase):
                                   lambda d: None, lambda d: None, {"engine": "auto"})
             self.assertTrue(job.start())
             self.assertIsInstance(job._impl, RustStressJob)
+            self.assertEqual(job.engine, "native")
+            self.assertEqual(job.describe(), "native engine")
 
     def test_auto_mode_falls_back_when_the_native_handshake_fails(self):
         bad = self._script(BAD_PROTOCOL_ENGINE)
@@ -262,6 +304,7 @@ class EngineSelectionTests(unittest.TestCase):
                                   lambda d: None, lambda d: None, {"engine": "auto"})
             self.assertTrue(job.start())
             self.assertIsInstance(job._impl, _DummyWorker)
+            self.assertEqual(job.describe(), "Python worker; the native engine did not start")
 
     def test_engine_dying_as_it_takes_the_job_reports_once_and_never_falls_back(self):
         """The reader reports the dead engine's job while start() is still
